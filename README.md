@@ -35,8 +35,13 @@ npm run dev                   # Express on :3000, Vite on :5173 proxying /api
 ```
 
 For local development set `DATA_DIR=./data`, `APP_ORIGIN=http://localhost:5173`
-and `NODE_ENV=development` (the session cookie is only `Secure` in production, so
-it would not survive plain HTTP otherwise).
+and `NODE_ENV=development` (which makes Vite serve the client instead of Express).
+
+`NODE_ENV` controls only that: which process serves the SPA. Everything that
+depends on the *scheme* — the `Secure` cookie flag, HSTS,
+`upgrade-insecure-requests` — follows `APP_ORIGIN` instead. So a production image
+served over an `http://` domain, which is what Coolify's generated sslip.io
+domains are, works correctly without pretending to be a development build.
 
 Other scripts:
 

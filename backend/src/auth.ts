@@ -7,7 +7,7 @@ import rateLimit from 'express-rate-limit';
 import { writeAudit } from './audit.js';
 import { db, sqlite } from './db/client.js';
 import { sessions } from './db/schema.js';
-import { env, isProduction } from './env.js';
+import { env, servedOverHttps } from './env.js';
 
 /**
  * All authentication lives behind this module. Swapping the single admin for an
@@ -36,7 +36,9 @@ function cookieOptions(): CookieOptions {
   return {
     httpOnly: true,
     sameSite: 'lax',
-    secure: isProduction,
+    // Keyed to the scheme we are actually served over, not to NODE_ENV: a
+    // `Secure` cookie on an http:// origin is silently dropped by the browser.
+    secure: servedOverHttps,
     path: '/',
     maxAge: SESSION_TTL_MS,
     // Signed with SESSION_SECRET so a tampered cookie is rejected before it

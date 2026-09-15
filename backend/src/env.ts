@@ -68,3 +68,16 @@ function load(): Env {
 
 export const env = load();
 export const isProduction = env.NODE_ENV === 'production';
+
+/**
+ * Whether the app is actually reachable over TLS, which is a different question
+ * from whether it is a production build. Coolify's generated domains are
+ * http://, so a production image can legitimately be served without TLS.
+ *
+ * Anything that breaks when the scheme is wrong — the `Secure` cookie flag,
+ * HSTS, upgrade-insecure-requests — keys off this, not off NODE_ENV. Tying the
+ * cookie to NODE_ENV means a production image on an http:// host sets `Secure`,
+ * the browser silently drops the cookie, and every request after login is
+ * anonymous with nothing in the UI to explain it.
+ */
+export const servedOverHttps = env.APP_ORIGIN.startsWith('https://');
