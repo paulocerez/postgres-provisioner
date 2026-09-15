@@ -8,6 +8,13 @@
       "when": 1789503403610,
       "tag": "0000_lumpy_shooting_star",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789506078632,
+      "tag": "0001_lethal_marrow",
+      "breakpoints": true
     }
   ]
 }

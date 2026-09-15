@@ -34,6 +34,13 @@ export const databaseMeta = sqliteTable('database_meta', {
   project: text('project'),
   owner: text('owner'),
   notes: text('notes'),
+  /**
+   * The password we generated at create time. Coolify 4.3.21 accepts a password
+   * on create but never discloses one afterwards, so this is the only copy —
+   * without it the details page cannot show a connection string that works.
+   * Null for databases created outside this app; theirs is unrecoverable.
+   */
+  postgresPassword: text('postgres_password'),
   createdBy: text('created_by').notNull(),
   createdAt: integer('created_at').notNull(),
 });

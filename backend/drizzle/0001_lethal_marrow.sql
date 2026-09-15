@@ -1,0 +1,1 @@
+ALTER TABLE `database_meta` ADD `postgres_password` text;

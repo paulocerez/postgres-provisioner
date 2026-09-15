@@ -91,7 +91,7 @@ extra hop.
 `PUBLIC_HOST` is separate on purpose: it is the host that goes into connection
 strings handed to applications, and it is never derived from `COOLIFY_URL`.
 
-## Verifying the Coolify API contract
+## The Coolify API contract
 
 **Coolify renames API fields between releases.** Every version-dependent name in
 this app lives in one marked block at the top of `backend/src/coolify.ts`:
@@ -100,20 +100,36 @@ this app lives in one marked block at the top of `backend/src/coolify.ts`:
 // --- COOLIFY FIELD MAP ---
 ```
 
-Before trusting it against a new installation:
+It is currently verified against **Coolify 4.3.21** — a live `GET /databases` on
+the Hetzner box plus `openapi.json` at tag `v4.3.21`. Three properties of that
+version shape the design, and are the first things to re-check after a Coolify
+upgrade:
+
+1. **SSL is not in the API at all.** No `enable_ssl` or `ssl_mode` on create or
+   PATCH — the fields appear on the resource but in no request body. Coolify
+   defaults SSL on. The app reads it back and warns loudly if it is off; it
+   cannot turn it on. That has to be done in the Coolify UI.
+2. **Passwords are never disclosed.** No read endpoint returns one, including
+   `/envs`. But `postgres_password` *is* accepted on create, so the app
+   generates one, sends it, and stores it — see the security section.
+3. **Lifecycle is POST**, not GET, and create requires `environment_uuid` in
+   addition to `environment_name`.
+
+To re-verify after an upgrade:
 
 ```bash
 curl -s -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/version"
 curl -s -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_URL/api/v1/databases" | jq '.[0]'
+curl -sL "https://raw.githubusercontent.com/coollabsio/coolify/v<version>/openapi.json" \
+  | jq '.paths["/databases/postgresql"].post.requestBody.content["application/json"].schema.properties | keys'
 ```
 
-Diff the returned keys against `RawDatabase` and the payload builders. If they
-disagree, that block is the only thing to edit — nothing else in the codebase
-references a Coolify field name.
+Diff against `RawDatabase` and the payload builders. If they disagree, that block
+is the only thing to edit — nothing else in the codebase names a Coolify field.
 
-Backup scheduling is the likeliest gap between versions. The app probes for it at
-startup: when the endpoint is missing, the create job marks the backup step
-*skipped* (never *failed*) and the UI shows a link to configure it in Coolify.
+Backups exist in 4.3.21 (`/databases/{uuid}/backups`). The app still probes at
+startup, and if a version ever lacks the endpoint the create job marks the backup
+step *skipped* — never *failed* — and the UI links out to Coolify.
 
 ## How create works
 
@@ -122,14 +138,15 @@ allocates a port, and returns a job id. The job runs in-process but persists
 every step transition, and the client polls `GET /api/jobs/:jobId` every 2s.
 
 ```
-create → configure (SSL + public access) → start → await-healthy → backup → done
+create → configure (public access) → start → await-healthy → backup → done
 ```
 
 Two things worth knowing:
 
 - **Order matters.** The database is created with `instant_deploy: false` and is
-  not started until SSL and public access are patched, because Coolify applies
-  both only on first data-directory creation.
+  not started until public access is patched, because Coolify applies the port
+  binding only on first data-directory creation. (SSL would belong in this step
+  too, but 4.3.21 does not expose it — see the API contract section.)
 - **Nothing is auto-deleted.** If a step after `create` fails, the resource stays
   and the job is marked failed with the step name; the UI says "created but not
   fully configured" and links into Coolify. Cleaning up is a deliberate act.
@@ -153,6 +170,15 @@ a clear message. A job is never left stuck in `running`.
   responses (several contain passwords).
 - Passwords and connection strings are redacted before anything is logged or
   written to the audit log.
+- **Database passwords are stored in SQLite, in plaintext, in `database_meta`.**
+  This is deliberate and it is the one real secret in that file. Coolify 4.3.21
+  accepts a password on create but never discloses one afterwards, so storing the
+  generated password is the only way the details page can show a connection
+  string that works. The consequence: **treat `$DATA_DIR/app.db` as a secret** —
+  anyone who can read it can reach every database this app created. Keep the
+  volume off backups that are less protected than the databases themselves.
+  Databases created outside this app have no stored password, and the UI says so
+  rather than showing a string that would not connect.
 - Delete requires typing the database name; deleting the data volume is a
   separate, unchecked-by-default opt-in.
 

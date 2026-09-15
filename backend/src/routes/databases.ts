@@ -11,10 +11,12 @@ import { eq } from 'drizzle-orm';
 import { Router } from 'express';
 import { writeAudit } from '../audit.js';
 import {
+  buildInternalConnectionUrl,
   buildPublicConnectionUrl,
   coolifyDatabaseUrl,
   deleteDatabase,
   getDatabase,
+  lastBackupExecution,
   listBackups,
   listDatabases,
   normaliseDatabase,
@@ -92,7 +94,12 @@ databasesRouter.get(
 
     const backups = await listBackups(uuid).catch(() => null);
     const schedule = backups?.[0] ?? null;
-    const lastRun = schedule?.database_backup_executions?.[0] ?? null;
+    const lastRun =
+      schedule?.uuid !== undefined ? await lastBackupExecution(uuid, schedule.uuid) : null;
+
+    // Coolify 4.3.21 never discloses a password, so the only one we can show is
+    // the one we generated at create time.
+    const password = row?.postgresPassword ?? null;
 
     const body: DatabaseDetail = {
       ...normaliseDatabase(
@@ -100,11 +107,11 @@ databasesRouter.get(
         row ? { project: row.project, owner: row.owner, notes: row.notes } : null,
         backups === null ? null : Boolean(schedule?.enabled),
       ),
-      internalUrl: raw.internal_db_url ?? null,
-      publicUrl: buildPublicConnectionUrl(raw),
+      internalUrl: buildInternalConnectionUrl(raw, password),
+      publicUrl: buildPublicConnectionUrl(raw, password),
       postgresUser: raw.postgres_user ?? null,
       postgresDb: raw.postgres_db ?? null,
-      postgresPassword: raw.postgres_password ?? null,
+      postgresPassword: password,
       coolifyUrl: coolifyDatabaseUrl(uuid),
       backup: schedule
         ? {

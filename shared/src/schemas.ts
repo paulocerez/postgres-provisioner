@@ -136,7 +136,9 @@ export type JobStepName = (typeof JOB_STEPS)[number];
 
 export const JOB_STEP_LABELS: Record<JobStepName, string> = {
   create: 'Creating',
-  configure: 'Configuring SSL/access',
+  // SSL is not settable through the Coolify API (4.3.21); this step configures
+  // public access only, and SSL is read back and surfaced as a warning.
+  configure: 'Configuring access',
   start: 'Starting',
   'await-healthy': 'Waiting for healthy',
   backup: 'Scheduling backup',

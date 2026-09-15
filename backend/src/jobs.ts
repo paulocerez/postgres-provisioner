@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   type CreateDatabaseInput,
   type Job,
@@ -41,7 +41,21 @@ export interface JobInput extends CreateDatabaseInput {
   image: string;
   isPublic: boolean;
   publicPort: number | null;
+  /**
+   * Generated here because Coolify 4.3.21 accepts a password on create but
+   * never returns one. Held in the job row only until the database_meta row is
+   * written, then scrubbed — see `scrubJobPassword`.
+   */
+  password: string;
   actor: string;
+}
+
+/**
+ * 32 bytes of base64url: no shell-quoting or URL-escaping hazards in a
+ * connection string, and far beyond guessing.
+ */
+function generatePassword(): string {
+  return randomBytes(24).toString('base64url');
 }
 
 function freshSteps(): JobStep[] {
@@ -89,6 +103,19 @@ function setJobStatus(
     .set({ status, updatedAt: Date.now(), ...patch })
     .where(eq(jobs.id, jobId))
     .run();
+}
+
+/** Replaces the password in a finished job's stored input with a placeholder. */
+function scrubJobPassword(jobId: string): void {
+  db.transaction((tx) => {
+    const row = tx.select().from(jobs).where(eq(jobs.id, jobId)).get();
+    if (!row) return;
+    const input = parseInput(row.input);
+    tx.update(jobs)
+      .set({ input: JSON.stringify({ ...input, password: '[stored]' }), updatedAt: Date.now() })
+      .where(eq(jobs.id, jobId))
+      .run();
+  });
 }
 
 export function createJob(input: JobInput): string {
@@ -167,6 +194,7 @@ export async function runJob(jobId: string): Promise<void> {
         image: input.image,
         isPublic: input.isPublic,
         publicPort: input.publicPort,
+        password: input.password,
       });
       uuid = created.uuid;
       setJobStatus(jobId, 'running', { resultUuid: uuid });
@@ -241,11 +269,16 @@ export async function runJob(jobId: string): Promise<void> {
         project: input.project ?? null,
         owner: input.owner ?? null,
         notes: input.notes ?? null,
+        postgresPassword: input.password,
         createdBy: input.actor,
         createdAt: Date.now(),
       })
       .onConflictDoNothing()
       .run();
+
+    // The password now lives on the meta row; a finished job has no reason to
+    // keep a second copy, and jobs are readable through the API.
+    scrubJobPassword(jobId);
 
     setJobStatus(jobId, 'done', { error: null });
     writeAudit({
@@ -253,7 +286,14 @@ export async function runJob(jobId: string): Promise<void> {
       action: 'create',
       targetUuid: resourceUuid,
       targetName: input.resolvedName,
-      details: { port: input.publicPort, image: input.image, backups: input.backups },
+      details: {
+        port: input.publicPort,
+        image: input.image,
+        backups: input.backups,
+        // SSL cannot be set through the 4.3.21 API; record what Coolify chose,
+        // so a default that changes under us is visible after the fact.
+        sslEnabled: Boolean(final.enable_ssl),
+      },
     });
   } catch (err) {
     const failing: JobStepName | null = current;
@@ -355,6 +395,7 @@ export function buildJobInput(
     image: imageForVersion(form.version) || env.DEFAULT_PG_IMAGE,
     isPublic: form.access === 'public',
     publicPort,
+    password: generatePassword(),
     actor,
   };
 }

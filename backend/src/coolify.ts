@@ -12,13 +12,23 @@ import { env } from './env.js';
  *
  * Coolify renames API fields between releases, so every version-dependent name
  * lives in the FIELD MAP below and nowhere else. If the installed version
- * disagrees with these guesses, that block is the only thing to edit — run
- * `GET /api/v1/databases` with a real token and diff the keys.
+ * disagrees, that block is the only thing to edit — run `GET /api/v1/databases`
+ * with a real token and diff the keys, and check `openapi.json` at the matching
+ * tag in coollabsio/coolify for the request bodies.
  */
 
 // ---------------------------------------------------------------------------
 // --- COOLIFY FIELD MAP -----------------------------------------------------
-// Verified against: <unverified — spec section 5.1, adapt after first deploy>
+// Verified against Coolify 4.3.21: live GET /databases on the Hetzner box plus
+// openapi.json at tag v4.3.21. Three things about this version drive the design:
+//
+//   1. SSL is not in the API at all — no `enable_ssl` or `ssl_mode` on create or
+//      PATCH. It is readable on the resource and Coolify defaults it on. We read
+//      it back and warn; we cannot set it.
+//   2. The password is never disclosed by any endpoint, but IS accepted on
+//      create. We generate it, send it, and store it — see jobs.ts.
+//   3. Lifecycle is POST, not GET, and create needs `environment_uuid` as well
+//      as `environment_name`.
 // ---------------------------------------------------------------------------
 
 /** A Postgres resource as returned by `GET /databases` and `GET /databases/{uuid}`. */
@@ -26,21 +36,21 @@ export interface RawDatabase {
   uuid: string;
   name: string;
   description?: string | null;
-  /** 'running', 'running:healthy', 'exited', 'restarting', 'degraded' ... */
+  /** 'running:healthy', 'exited', 'restarting', 'degraded' ... */
   status?: string | null;
   image?: string | null;
+  /** 'standalone-postgresql', 'standalone-redis', ... */
+  database_type?: string | null;
   is_public?: boolean | null;
   public_port?: number | null;
+  /** Read-only in 4.3.21: present on the resource, absent from every request body. */
   enable_ssl?: boolean | null;
   ssl_mode?: string | null;
   postgres_user?: string | null;
-  postgres_password?: string | null;
   postgres_db?: string | null;
-  internal_db_url?: string | null;
-  external_db_url?: string | null;
   created_at?: string | null;
-  destination?: { server?: { name?: string } } | null;
-  environment_name?: string | null;
+  destination?: { name?: string; uuid?: string } | null;
+  environment?: { name?: string; uuid?: string } | null;
 }
 
 interface RawServer {
@@ -58,48 +68,81 @@ interface RawBackup {
   uuid?: string;
   enabled?: boolean | null;
   frequency?: string | null;
-  database_backup_executions?: Array<{
-    created_at?: string | null;
-    status?: string | null;
-  }> | null;
 }
 
-/** Body for `POST /databases/postgresql`. */
+interface RawBackupExecution {
+  created_at?: string | null;
+  status?: string | null;
+}
+
+/**
+ * Body for `POST /databases/postgresql`.
+ *
+ * `postgres_password` is ours to choose: 4.3.21 accepts it here and never gives
+ * it back from any read endpoint, so generating it is the only way to end up
+ * with a connection string that works.
+ */
 function buildCreatePayload(input: {
   name: string;
   description?: string;
   image: string;
   isPublic: boolean;
   publicPort: number | null;
+  password: string;
   serverUuid: string;
   projectUuid: string;
+  environmentUuid: string;
 }): Record<string, unknown> {
   return {
     server_uuid: input.serverUuid,
     project_uuid: input.projectUuid,
+    // Both are required by the 4.3.21 schema, not one or the other.
     environment_name: env.COOLIFY_ENVIRONMENT,
+    environment_uuid: input.environmentUuid,
     name: input.name,
     description: input.description ?? '',
     image: input.image,
     postgres_user: 'postgres',
-    postgres_db: input.name.replace(/-/g, '_'),
+    postgres_password: input.password,
+    postgres_db: postgresDbName(input.name),
     is_public: input.isPublic,
     ...(input.publicPort !== null ? { public_port: input.publicPort } : {}),
     instant_deploy: false,
   };
 }
 
-/** Body for the pre-start `PATCH /databases/{uuid}`. */
+/**
+ * Body for the pre-start `PATCH /databases/{uuid}`. Public access only — SSL is
+ * not settable in this version (see the note at the top of the field map).
+ */
 function buildConfigurePayload(input: {
   isPublic: boolean;
   publicPort: number | null;
 }): Record<string, unknown> {
   return {
-    enable_ssl: true,
-    ssl_mode: 'require',
     is_public: input.isPublic,
     ...(input.publicPort !== null ? { public_port: input.publicPort } : {}),
   };
+}
+
+/** Body for `POST /databases/{uuid}/backups`. */
+function buildBackupPayload(s3StorageUuid: string): Record<string, unknown> {
+  return {
+    frequency: '0 3 * * *',
+    enabled: true,
+    save_s3: true,
+    s3_storage_uuid: s3StorageUuid,
+    database_backup_retention_amount_s3: 14,
+    database_backup_retention_amount_locally: 14,
+    // One immediate run, so a broken backup config is discovered now rather
+    // than at 03:00 on the day it is needed.
+    backup_now: true,
+  };
+}
+
+/** Postgres rejects hyphens in unquoted identifiers, so `demo-db` → `demo_db`. */
+function postgresDbName(name: string): string {
+  return name.replace(/-/g, '_');
 }
 
 /** Coolify's status strings are free-form; anything unrecognised is 'unknown'. */
@@ -111,6 +154,13 @@ function mapStatus(raw: string | null | undefined): DatabaseStatus {
   if (value.startsWith('exited')) return 'exited';
   if (value.startsWith('stopped') || value.startsWith('degraded')) return 'stopped';
   return 'unknown';
+}
+
+/** Only Postgres resources; `/databases` returns every engine Coolify manages. */
+function isPostgres(raw: RawDatabase): boolean {
+  const type = (raw.database_type ?? '').toLowerCase();
+  if (type) return type.includes('postgres');
+  return (raw.image ?? '').toLowerCase().includes('postgres');
 }
 
 function versionFromImage(image: string | null | undefined): string {
@@ -176,6 +226,9 @@ async function request<T>(
   try {
     return JSON.parse(text) as T;
   } catch {
+    // `/version` answers with a bare `4.3.21`, which is not valid JSON. Hand the
+    // raw text back and let the caller decide; anything else is a real error.
+    if (endpoint === '/version') return text.trim() as T;
     throw new CoolifyError(
       response.status,
       endpoint,
@@ -192,6 +245,8 @@ interface Resolved {
   serverUuid: string;
   projectUuid: string;
   projectName: string | null;
+  /** Required by `POST /databases/postgresql` in 4.3.21, alongside the name. */
+  environmentUuid: string;
   backupsSupported: boolean;
 }
 
@@ -228,9 +283,31 @@ export async function resolveInstance(): Promise<Resolved> {
     projectName = projects.find((p) => p.uuid === projectUuid)?.name ?? null;
   }
 
+  // The environment uuid only appears on the single-project endpoint, and
+  // creates are rejected without it.
+  const project = await request<RawProject>('GET', `/projects/${projectUuid}`);
+  const environments = project.environments ?? [];
+  const environment =
+    environments.find((e) => e.name === env.COOLIFY_ENVIRONMENT) ?? environments[0];
+  if (!environment) {
+    throw new CoolifyError(
+      0,
+      `/projects/${projectUuid}`,
+      '',
+      `Project "${projectName ?? projectUuid}" has no environment named "${env.COOLIFY_ENVIRONMENT}".`,
+    );
+  }
+
   const backupsSupported = await probeBackupsSupport();
 
-  resolved = { version, serverUuid, projectUuid, projectName, backupsSupported };
+  resolved = {
+    version,
+    serverUuid,
+    projectUuid,
+    projectName,
+    environmentUuid: environment.uuid,
+    backupsSupported,
+  };
   return resolved;
 }
 
@@ -272,8 +349,7 @@ export function requireResolved(): Resolved {
 
 export async function listDatabases(): Promise<RawDatabase[]> {
   const all = await request<RawDatabase[]>('GET', '/databases');
-  // `/databases` returns every database type; we only manage Postgres.
-  return all.filter((d) => (d.image ?? '').toLowerCase().includes('postgres'));
+  return all.filter(isPostgres);
 }
 
 export function getDatabase(uuid: string): Promise<RawDatabase> {
@@ -286,12 +362,13 @@ export function createPostgres(input: {
   image: string;
   isPublic: boolean;
   publicPort: number | null;
+  password: string;
 }): Promise<{ uuid: string }> {
-  const { serverUuid, projectUuid } = requireResolved();
+  const { serverUuid, projectUuid, environmentUuid } = requireResolved();
   return request<{ uuid: string }>(
     'POST',
     '/databases/postgresql',
-    buildCreatePayload({ ...input, serverUuid, projectUuid }),
+    buildCreatePayload({ ...input, serverUuid, projectUuid, environmentUuid }),
   );
 }
 
@@ -306,23 +383,27 @@ export function patchPublicPort(uuid: string, publicPort: number): Promise<unkno
   return request('PATCH', `/databases/${uuid}`, { public_port: publicPort });
 }
 
+// Lifecycle is POST in 4.3.21 — a GET here answers 405.
 export function startDatabase(uuid: string): Promise<unknown> {
-  return request('GET', `/databases/${uuid}/start`);
+  return request('POST', `/databases/${uuid}/start`);
 }
 
 export function stopDatabase(uuid: string): Promise<unknown> {
-  return request('GET', `/databases/${uuid}/stop`);
+  return request('POST', `/databases/${uuid}/stop`);
 }
 
 export function restartDatabase(uuid: string): Promise<unknown> {
-  return request('GET', `/databases/${uuid}/restart`);
+  return request('POST', `/databases/${uuid}/restart`);
 }
 
 export function deleteDatabase(uuid: string, deleteVolume: boolean): Promise<unknown> {
   const query = new URLSearchParams({
+    // Every one of these defaults to true, so the volume must be passed
+    // explicitly — omitting it would destroy the data.
     delete_volumes: String(deleteVolume),
     delete_configurations: 'true',
-    cleanup: 'true',
+    docker_cleanup: 'true',
+    delete_connected_networks: 'true',
   });
   return request('DELETE', `/databases/${uuid}?${query.toString()}`);
 }
@@ -344,17 +425,28 @@ export async function listBackups(uuid: string): Promise<RawBackup[] | null> {
 export async function scheduleDailyBackup(uuid: string): Promise<boolean> {
   if (!env.COOLIFY_S3_STORAGE_UUID) return false;
   try {
-    await request('POST', `/databases/${uuid}/backups`, {
-      enabled: true,
-      frequency: '0 3 * * *',
-      save_s3: true,
-      s3_storage_uuid: env.COOLIFY_S3_STORAGE_UUID,
-      number_of_backups_locally: 14,
-    });
+    await request('POST', `/databases/${uuid}/backups`, buildBackupPayload(env.COOLIFY_S3_STORAGE_UUID));
     return true;
   } catch (err) {
     if (err instanceof CoolifyError && (err.status === 404 || err.status === 405)) return false;
     throw err;
+  }
+}
+
+/** Last execution of a schedule, for the details page. */
+export async function lastBackupExecution(
+  uuid: string,
+  scheduleUuid: string,
+): Promise<RawBackupExecution | null> {
+  try {
+    const executions = await request<RawBackupExecution[]>(
+      'GET',
+      `/databases/${uuid}/backups/${scheduleUuid}/executions`,
+    );
+    return executions[0] ?? null;
+  } catch {
+    // Missing execution history is not worth failing the details page over.
+    return null;
   }
 }
 
@@ -388,12 +480,39 @@ export function normaliseDatabase(
   };
 }
 
-export function buildPublicConnectionUrl(raw: RawDatabase): string | null {
-  if (!raw.is_public || !raw.public_port) return null;
+/**
+ * Connection strings are assembled here rather than read from Coolify, which
+ * discloses neither the password nor a URL in 4.3.21. `password` is the one we
+ * generated at create time; it is null for databases created outside this app
+ * (their password is unrecoverable), and the UI says so rather than handing out
+ * a string that cannot work.
+ */
+export function buildPublicConnectionUrl(
+  raw: RawDatabase,
+  password: string | null,
+): string | null {
+  if (!raw.is_public || !raw.public_port || !password) return null;
   const user = raw.postgres_user ?? 'postgres';
-  const password = raw.postgres_password ?? '';
-  const database = raw.postgres_db ?? raw.name;
-  return `postgres://${user}:${password}@${env.PUBLIC_HOST}:${raw.public_port}/${database}?sslmode=require`;
+  const database = raw.postgres_db ?? postgresDbName(raw.name);
+  // `sslmode=require` against a server without SSL fails to connect, so the
+  // string has to describe the database as it actually is — the UI warns
+  // separately when SSL is off.
+  const sslMode = raw.enable_ssl ? 'require' : 'disable';
+  return `postgres://${user}:${password}@${env.PUBLIC_HOST}:${raw.public_port}/${database}?sslmode=${sslMode}`;
 }
 
-export { mapStatus, versionFromImage };
+/**
+ * Reachable from other containers on the Coolify network. Coolify names
+ * database containers after their uuid, so that is the host.
+ */
+export function buildInternalConnectionUrl(
+  raw: RawDatabase,
+  password: string | null,
+): string | null {
+  if (!password) return null;
+  const user = raw.postgres_user ?? 'postgres';
+  const database = raw.postgres_db ?? postgresDbName(raw.name);
+  return `postgres://${user}:${password}@${raw.uuid}:5432/${database}`;
+}
+
+export { mapStatus, versionFromImage, isPostgres, postgresDbName };
