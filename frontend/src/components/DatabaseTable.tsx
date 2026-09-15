@@ -82,7 +82,23 @@ const columns = [
   }),
   columnHelper.accessor('sslEnabled', {
     header: 'SSL',
-    cell: (info) => (info.getValue() ? 'yes' : 'no'),
+    // A public port without SSL means passwords cross the internet in the
+    // clear, so it is called out rather than shown as a quiet "no".
+    cell: (info) =>
+      info.getValue() ? (
+        'yes'
+      ) : (
+        <span
+          className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700"
+          title={
+            info.row.original.isPublic
+              ? 'SSL is off and this database is exposed on a host port — connections are unencrypted.'
+              : 'SSL is off for this database.'
+          }
+        >
+          off
+        </span>
+      ),
   }),
   columnHelper.accessor((row) => row.backupsEnabled, {
     id: 'backups',

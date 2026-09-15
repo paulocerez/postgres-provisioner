@@ -69,6 +69,25 @@ function DatabaseDetailPage() {
       <ErrorBanner error={lifecycle.error} title="Action failed" />
       <ErrorBanner error={remove.error} title="Delete failed" />
 
+      {/*
+        SSL cannot be set through the Coolify API, so this is a warning rather
+        than something the app offers to fix.
+      */}
+      {!data.sslEnabled && (
+        <div
+          role="alert"
+          className="rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-800"
+        >
+          <p className="font-semibold">SSL is disabled</p>
+          <p className="mt-1">
+            {data.isPublic
+              ? 'This database is reachable on a host port and connections are not encrypted — credentials and data cross the network in the clear.'
+              : 'Connections to this database are not encrypted.'}{' '}
+            Coolify&apos;s API cannot change this setting; enable SSL in the Coolify UI.
+          </p>
+        </div>
+      )}
+
       <section className="card">
         <dl className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-3">
           <Fact label="Description" value={data.description ?? '—'} />
@@ -98,6 +117,20 @@ function DatabaseDetailPage() {
 
       <section className="card space-y-4">
         <h2 className="font-semibold text-slate-900">Connection</h2>
+
+        {/*
+          Coolify never discloses a database password, so the only ones we can
+          show are those this app generated. Say so plainly rather than
+          rendering a string that would not connect.
+        */}
+        {!data.postgresPassword && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            This database was not created through this app, so its password is not
+            recoverable — Coolify&apos;s API does not disclose one. Connect using the
+            credentials you already hold, or read them from the container in Coolify.
+          </p>
+        )}
+
         <ConnectionString
           label="Public"
           value={data.publicUrl}
@@ -107,7 +140,11 @@ function DatabaseDetailPage() {
               : undefined
           }
         />
-        <ConnectionString label="Internal (Docker network)" value={data.internalUrl} />
+        <ConnectionString
+          label="Internal (Docker network)"
+          value={data.internalUrl}
+          hint={data.internalUrl ? 'For other containers on the Coolify network.' : undefined}
+        />
       </section>
 
       <section className="card space-y-2">
