@@ -24,9 +24,20 @@ const envSchema = z
     DEFAULT_PG_IMAGE: z.string().default('postgres:18-alpine'),
 
     ADMIN_EMAIL: z.string().email('must be a valid email address'),
+    /**
+     * Checked for shape, not just presence. A bcrypt hash is full of `$`, and
+     * platforms that interpolate environment variables (Coolify's default, for
+     * one) silently expand `$2a`/`$12` into nothing. The result still looks like
+     * a populated variable but can never match a password, which surfaces as an
+     * unexplained "Invalid email or password" at the login screen. Fail at boot
+     * with a message that names the cause instead.
+     */
     ADMIN_PASSWORD_HASH: z
       .string()
-      .min(1, 'bcrypt hash — generate one with `npm run hash-password -- <password>`'),
+      .regex(
+        /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/,
+        'must be a bcrypt hash of the form $2a$12$… (60 characters). Generate one with `npm run hash-password -- <password>`. If it looks truncated, your host interpolated the $ signs — disable variable interpolation for this variable.',
+      ),
     SESSION_SECRET: z.string().min(32, 'must be at least 32 characters'),
 
     APP_ORIGIN: z.string().url('full origin of the deployed app, used for the CSRF check'),
