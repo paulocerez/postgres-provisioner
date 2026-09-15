@@ -22,6 +22,15 @@ const app = express();
 // per-IP rate limit both see the proxy instead of the client.
 app.set('trust proxy', 1);
 
+/**
+ * Helmet adds `upgrade-insecure-requests` by default, which makes the browser
+ * rewrite asset requests to https://. On an http:// deployment — Coolify's
+ * generated sslip.io domain, say — there is no certificate to upgrade to, so
+ * the bundle fails to load and the page renders blank with nothing in the UI to
+ * explain it. Emit the directive only when the app is actually served over TLS.
+ */
+const servedOverHttps = env.APP_ORIGIN.startsWith('https://');
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -36,8 +45,12 @@ app.use(
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],
+        ...(servedOverHttps ? {} : { upgradeInsecureRequests: null }),
       },
     },
+    // HSTS on an http:// origin is meaningless, and once a browser has seen it
+    // for this host it will refuse plain http even after you switch domains.
+    strictTransportSecurity: servedOverHttps,
     crossOriginEmbedderPolicy: false,
   }),
 );
