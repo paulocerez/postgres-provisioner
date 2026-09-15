@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+data/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.context/
+frontend/src/routeTree.gen.ts
