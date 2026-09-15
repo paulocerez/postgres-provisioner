@@ -1,0 +1,13 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.context
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+data
+README.md
