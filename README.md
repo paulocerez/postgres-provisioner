@@ -12,8 +12,8 @@ put.
 What it does that clicking through Coolify does not:
 
 - picks the lowest free host port in the configured range,
-- enables SSL **before** the first start (Coolify only applies SSL and the
-  initial password when the data directory is first created),
+- stops before the first start if Coolify made the database without SSL, which is
+  the last moment enabling it still takes effect,
 - schedules the daily S3 backup,
 - and hands you a working `psql` connection string at the end.
 
@@ -111,9 +111,12 @@ version shape the design, and are the first things to re-check after a Coolify
 upgrade:
 
 1. **SSL is not in the API at all.** No `enable_ssl` or `ssl_mode` on create or
-   PATCH — the fields appear on the resource but in no request body. Coolify
-   defaults SSL on. The app reads it back and warns loudly if it is off; it
-   cannot turn it on. That has to be done in the Coolify UI.
+   PATCH — the fields appear on the resource but in no request body. Worse,
+   databases created through the API come out with SSL **off**; one created in
+   the Coolify UI has it on only because there is a toggle there. The app reads
+   the flag back, pauses the create before the first start when it is off, and
+   warns wherever a database is running without it. It cannot turn SSL on — that
+   has to be done in the Coolify UI.
 2. **Passwords are never disclosed.** No read endpoint returns one, including
    `/envs`. But `postgres_password` *is* accepted on create, so the app
    generates one, sends it, and stores it — see the security section.
