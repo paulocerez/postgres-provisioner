@@ -16,7 +16,6 @@ import {
   getDatabase,
   listDatabases,
   patchPublicPort,
-  requireResolved,
   scheduleDailyBackup,
   startDatabase,
 } from './coolify.js';
@@ -388,7 +387,6 @@ export function buildJobInput(
   publicPort: number | null,
   actor: string,
 ): JobInput {
-  requireResolved();
   return {
     ...form,
     resolvedName,

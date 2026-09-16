@@ -259,6 +259,29 @@ let resolved: Resolved | null = null;
  * needs to be reachable in order to *show* that Coolify is unreachable.
  */
 export async function resolveInstance(): Promise<Resolved> {
+  return (resolved = await doResolve());
+}
+
+/** In-flight resolution, so concurrent callers share one attempt. */
+let resolving: Promise<Resolved> | null = null;
+
+/**
+ * Resolution on demand. If the startup attempt failed — Coolify was down, or
+ * its API allowlist had not been updated yet — retry here instead of requiring
+ * a restart. Fixing something on the Coolify side should be enough to make the
+ * app work again.
+ */
+export async function ensureResolved(): Promise<Resolved> {
+  if (resolved) return resolved;
+  resolving ??= doResolve()
+    .then((value) => (resolved = value))
+    .finally(() => {
+      resolving = null;
+    });
+  return resolving;
+}
+
+async function doResolve(): Promise<Resolved> {
   const version = await request<{ version?: string } | string>('GET', '/version')
     .then((v) => (typeof v === 'string' ? v : (v?.version ?? null)))
     .catch(() => null);
@@ -300,7 +323,7 @@ export async function resolveInstance(): Promise<Resolved> {
 
   const backupsSupported = await probeBackupsSupport();
 
-  resolved = {
+  return {
     version,
     serverUuid,
     projectUuid,
@@ -308,7 +331,6 @@ export async function resolveInstance(): Promise<Resolved> {
     environmentUuid: environment.uuid,
     backupsSupported,
   };
-  return resolved;
 }
 
 /**
@@ -356,7 +378,7 @@ export function getDatabase(uuid: string): Promise<RawDatabase> {
   return request<RawDatabase>('GET', `/databases/${uuid}`);
 }
 
-export function createPostgres(input: {
+export async function createPostgres(input: {
   name: string;
   description?: string;
   image: string;
@@ -364,7 +386,9 @@ export function createPostgres(input: {
   publicPort: number | null;
   password: string;
 }): Promise<{ uuid: string }> {
-  const { serverUuid, projectUuid, environmentUuid } = requireResolved();
+  // Resolves on demand rather than trusting the startup attempt, which may have
+  // run before Coolify was reachable.
+  const { serverUuid, projectUuid, environmentUuid } = await ensureResolved();
   return request<{ uuid: string }>(
     'POST',
     '/databases/postgresql',
@@ -450,10 +474,16 @@ export async function lastBackupExecution(
   }
 }
 
-/** Deep link into the Coolify UI for a database. */
+/**
+ * Deep link into the Coolify UI for a database. Falls back to the Coolify root
+ * when the project has not been resolved — a slightly worse link is better than
+ * failing the whole details page over a hyperlink.
+ */
 export function coolifyDatabaseUrl(uuid: string): string {
-  const { projectUuid } = requireResolved();
-  return `${env.COOLIFY_URL.replace(/\/$/, '')}/project/${projectUuid}/${env.COOLIFY_ENVIRONMENT}/database/${uuid}`;
+  const base = env.COOLIFY_URL.replace(/\/$/, '');
+  const projectUuid = resolved?.projectUuid;
+  if (!projectUuid) return base;
+  return `${base}/project/${projectUuid}/${env.COOLIFY_ENVIRONMENT}/database/${uuid}`;
 }
 
 // --- normalisation ----------------------------------------------------------

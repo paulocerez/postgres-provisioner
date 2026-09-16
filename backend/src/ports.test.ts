@@ -7,7 +7,8 @@ process.env.COOLIFY_URL ??= 'http://localhost:8000';
 process.env.COOLIFY_TOKEN ??= 'test-token';
 process.env.PUBLIC_HOST ??= '127.0.0.1';
 process.env.ADMIN_EMAIL ??= 'admin@example.com';
-process.env.ADMIN_PASSWORD_HASH ??= 'x';
+// Shape matters to env.ts, so this has to look like a real bcrypt hash.
+process.env.ADMIN_PASSWORD_HASH ??= '$2a$04$CGH7aUgMT0N/m9CZzgEazeqntdOffBIWzuTYoyFONasZmIS/CyoMy';
 process.env.SESSION_SECRET ??= 'x'.repeat(32);
 process.env.APP_ORIGIN ??= 'http://localhost:5173';
 
