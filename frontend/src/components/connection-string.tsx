@@ -1,6 +1,11 @@
 import { useState } from 'react';
-import { useToast } from './toaster';
+import { useCopy } from '../hooks/use-copy';
 import { CopyIcon, EyeIcon, EyeOffIcon } from './icons';
+
+/** Blank out the password in a `postgres://user:password@host` URL. */
+export function maskUrl(value: string) {
+  return value.replace(/:\/\/([^:]+):[^@]*@/, '://$1:••••••••@');
+}
 
 /**
  * Connection strings contain the database password, so they stay masked until
@@ -16,7 +21,7 @@ export function ConnectionString({
   hint?: string;
 }) {
   const [revealed, setRevealed] = useState(false);
-  const notify = useToast();
+  const copy = useCopy();
 
   if (!value) {
     return (
@@ -28,17 +33,6 @@ export function ConnectionString({
       </div>
     );
   }
-
-  const copy = async (text: string, what: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      notify(`${what} copied to the clipboard.`);
-    } catch {
-      // Clipboard access is denied over plain http on some browsers; saying so
-      // beats a button that silently does nothing.
-      notify('The browser blocked clipboard access.', 'error');
-    }
-  };
 
   return (
     <div>
@@ -74,7 +68,7 @@ export function ConnectionString({
         </div>
       </div>
       <pre className="mt-1.5 overflow-x-auto rounded-md border border-line bg-raised px-3 py-2.5 font-mono text-xs text-fg">
-        {revealed ? value : value.replace(/:\/\/([^:]+):[^@]*@/, '://$1:••••••••@')}
+        {revealed ? value : maskUrl(value)}
       </pre>
       {hint && <p className="hint">{hint}</p>}
     </div>

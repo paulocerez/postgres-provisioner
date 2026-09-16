@@ -172,6 +172,16 @@
     @apply alert border-warning/25 bg-warning/[0.07] text-fg;
   }
 
+  /* --- tabs --------------------------------------------------------------- */
+  /* The underline is a transparent border in the resting state so switching
+     tabs never shifts the strip by a pixel. */
+  .tab {
+    @apply -mb-px border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted transition-colors hover:text-fg;
+  }
+  .tab-active {
+    @apply tab border-accent text-fg;
+  }
+
   /* --- misc --------------------------------------------------------------- */
   .kbd {
     @apply inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-line bg-raised px-1 font-sans text-2xs font-medium tracking-normal text-muted;

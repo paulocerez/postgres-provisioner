@@ -8,6 +8,7 @@ import {
   useLifecycleAction,
 } from '../../api/queries';
 import { ConfirmDialog } from '../../components/confirm-dialog';
+import { ConnectSnippets } from '../../components/connect-snippets';
 import { ConnectionString } from '../../components/connection-string';
 import { ErrorBanner } from '../../components/error-banner';
 import { MetaCard } from '../../components/meta-card';
@@ -191,6 +192,8 @@ function DatabaseDetailPage() {
           />
         </div>
       </section>
+
+      <ConnectSnippets database={data} publicHost={meta.data?.publicHost} />
 
       <section className="card">
         <div className="card-header">
