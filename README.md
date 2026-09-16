@@ -71,6 +71,11 @@ grep -rE 'COOLIFY_TOKEN|ADMIN_PASSWORD_HASH|SESSION_SECRET' frontend/dist   # no
 
 ## Deploying on Coolify
 
+Setting this up on a fresh Coolify instance? **[SETUP.md](SETUP.md)** is the
+full walkthrough, with the reasoning behind each step and a troubleshooting table
+covering every failure hit during the first real deployment. The summary below
+assumes you already know the platform.
+
 1. Push this repo to GitHub.
 2. Coolify → your project → **New Resource → Application → GitHub**. A public
    repo URL is enough; otherwise install the Coolify GitHub app.
