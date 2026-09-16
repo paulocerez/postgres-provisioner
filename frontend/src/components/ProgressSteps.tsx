@@ -40,6 +40,21 @@ export function ProgressSteps({ job, coolifyUrl }: { job: Job; coolifyUrl?: stri
         </li>
       </ol>
 
+      {job.status === 'paused' && job.pausedReason && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">Waiting for you: SSL is disabled</p>
+          <p className="mt-1">{job.pausedReason}</p>
+          {coolifyUrl && (
+            <p className="mt-2">
+              <a className="underline" href={coolifyUrl} target="_blank" rel="noreferrer">
+                Open this database in Coolify
+              </a>{' '}
+              → Configuration → enable SSL, then come back and continue.
+            </p>
+          )}
+        </div>
+      )}
+
       {job.status === 'failed' && (
         <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
           <p className="font-semibold">

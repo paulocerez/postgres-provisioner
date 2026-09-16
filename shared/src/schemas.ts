@@ -154,7 +154,7 @@ export type JobStep = z.infer<typeof jobStepSchema>;
 
 export const jobSchema = z.object({
   id: z.string(),
-  status: z.enum(['pending', 'running', 'done', 'failed']),
+  status: z.enum(['pending', 'running', 'paused', 'done', 'failed']),
   steps: z.array(jobStepSchema),
   error: z.string().nullable(),
   result: z.object({ uuid: z.string() }).nullable(),
@@ -163,6 +163,13 @@ export const jobSchema = z.object({
    * "created but not fully configured" rather than pretending nothing happened.
    */
   partial: z.boolean(),
+  /**
+   * Set when the job is `paused` and waiting on the operator. Coolify 4.3.21
+   * cannot enable SSL through its API, and only applies SSL when the data
+   * directory is first created — so the job stops before the first start,
+   * while turning it on in the Coolify UI still takes effect.
+   */
+  pausedReason: z.string().nullable(),
 });
 export type Job = z.infer<typeof jobSchema>;
 

@@ -143,7 +143,7 @@ allocates a port, and returns a job id. The job runs in-process but persists
 every step transition, and the client polls `GET /api/jobs/:jobId` every 2s.
 
 ```
-create → configure (public access) → start → await-healthy → backup → done
+create → configure (public access) → [SSL checkpoint] → start → await-healthy → backup → done
 ```
 
 Two things worth knowing:
@@ -152,6 +152,13 @@ Two things worth knowing:
   not started until public access is patched, because Coolify applies the port
   binding only on first data-directory creation. (SSL would belong in this step
   too, but 4.3.21 does not expose it — see the API contract section.)
+- **The job stops before the first start if SSL is off.** Coolify 4.3.21 creates
+  databases with SSL disabled and exposes no way to turn it on through the API,
+  and it only applies SSL when the data directory is first created. So the job
+  pauses at that exact point and waits: enable SSL on the database in Coolify,
+  then press continue (which re-checks) — or continue without SSL deliberately.
+  Pausing here is the difference between a one-click fix and recreating the
+  database later.
 - **Nothing is auto-deleted.** If a step after `create` fails, the resource stays
   and the job is marked failed with the step name; the UI says "created but not
   fully configured" and links into Coolify. Cleaning up is a deliberate act.

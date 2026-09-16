@@ -17,7 +17,9 @@ export const sessions = sqliteTable('sessions', {
 export const jobs = sqliteTable('jobs', {
   id: text('id').primaryKey(),
   type: text('type').notNull().$type<'create'>(),
-  status: text('status').notNull().$type<'pending' | 'running' | 'done' | 'failed'>(),
+  status: text('status')
+    .notNull()
+    .$type<'pending' | 'running' | 'paused' | 'done' | 'failed'>(),
   /** JSON: the validated CreateDatabaseInput plus the allocated port. */
   input: text('input').notNull(),
   /** JSON: JobStep[] — see shared/schemas.ts. */

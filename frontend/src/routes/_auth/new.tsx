@@ -9,7 +9,13 @@ import { useForm } from '@tanstack/react-form';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { databasesQuery, jobQuery, metaQuery, useCreateDatabase } from '../../api/queries';
+import {
+  databasesQuery,
+  jobQuery,
+  metaQuery,
+  useContinueJob,
+  useCreateDatabase,
+} from '../../api/queries';
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { ProgressSteps } from '../../components/ProgressSteps';
 
@@ -249,6 +255,7 @@ function CreateProgress({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const job = useQuery(jobQuery(jobId));
   const meta = useQuery(metaQuery);
+  const resume = useContinueJob(jobId);
 
   useEffect(() => {
     if (job.data?.status === 'done' && job.data.result) {
@@ -274,6 +281,29 @@ function CreateProgress({ jobId }: { jobId: string }) {
         )}
       </div>
       <ErrorBanner error={job.error} title="Lost track of the job" />
+      <ErrorBanner error={resume.error} title="Could not continue" />
+
+      {job.data?.status === 'paused' && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={resume.isPending}
+            onClick={() => resume.mutate(false)}
+          >
+            {resume.isPending ? 'Checking…' : "I've enabled SSL — continue"}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={resume.isPending}
+            onClick={() => resume.mutate(true)}
+            title="Starts the database with SSL disabled. Connections will not be encrypted."
+          >
+            Continue without SSL
+          </button>
+        </div>
+      )}
       {job.data?.status === 'failed' && (
         <div className="flex gap-2">
           {job.data.result && (

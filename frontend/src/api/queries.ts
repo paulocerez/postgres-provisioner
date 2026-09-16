@@ -65,12 +65,25 @@ export const jobQuery = (id: string) =>
   queryOptions({
     queryKey: queryKeys.job(id),
     queryFn: () => apiFetch<Job>(`/jobs/${id}`),
-    // Stop polling once the job reaches a terminal state.
+    // Stop polling once the job reaches a terminal state, or when it is paused
+    // waiting on the operator.
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === 'done' || status === 'failed' ? false : 2_000;
+      return status === 'done' || status === 'failed' || status === 'paused' ? false : 2_000;
     },
   });
+
+/** Resumes a job paused at the pre-start SSL checkpoint. */
+export function useContinueJob(jobId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (force: boolean) =>
+      apiFetch<{ ok: true }>(`/jobs/${jobId}/continue`, { method: 'POST', body: { force } }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.job(jobId) });
+    },
+  });
+}
 
 // --- mutations --------------------------------------------------------------
 

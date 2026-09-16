@@ -47,7 +47,12 @@ export interface JobInput extends CreateDatabaseInput {
    */
   password: string;
   actor: string;
+  /** Set by "continue without SSL" so a resumed job stops re-pausing. */
+  sslOverride?: boolean;
 }
+
+export const SSL_PAUSE_REASON =
+  'This database was created with SSL disabled. Coolify 4.3.21 cannot enable SSL through its API, and only applies it when the data directory is first created — so the job has stopped before the first start, while turning SSL on in Coolify still takes effect. Enable SSL on this database in Coolify, then continue.';
 
 /**
  * 32 bytes of base64url: no shell-quoting or URL-escaping hazards in a
@@ -95,7 +100,7 @@ function updateStep(
 
 function setJobStatus(
   jobId: string,
-  status: 'pending' | 'running' | 'done' | 'failed',
+  status: 'pending' | 'running' | 'paused' | 'done' | 'failed',
   patch: { error?: string | null; resultUuid?: string | null } = {},
 ): void {
   db.update(jobs)
@@ -148,7 +153,44 @@ export function getJob(jobId: string): Job | null {
     // The resource exists but a later step failed: "created but not fully
     // configured" rather than a clean failure the operator can ignore.
     partial: row.status === 'failed' && row.resultUuid !== null,
+    pausedReason: row.status === 'paused' ? SSL_PAUSE_REASON : null,
   };
+}
+
+/**
+ * Resumes a paused job. Re-checks SSL unless the operator explicitly chose to
+ * proceed without it, so "continue" cannot silently skip the thing it is
+ * waiting for.
+ */
+export async function continueJob(
+  jobId: string,
+  options: { force: boolean },
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const row = db.select().from(jobs).where(eq(jobs.id, jobId)).get();
+  if (!row) return { ok: false, message: 'No such job.' };
+  if (row.status !== 'paused') return { ok: false, message: 'This job is not paused.' };
+
+  const input = parseInput(row.input);
+
+  if (!options.force) {
+    if (!row.resultUuid) return { ok: false, message: 'This job has no database to check.' };
+    const current = await getDatabase(row.resultUuid);
+    if (!current.enable_ssl) {
+      return {
+        ok: false,
+        message:
+          'SSL is still disabled on this database in Coolify. Enable it there and try again, or continue without SSL.',
+      };
+    }
+  } else {
+    db.update(jobs)
+      .set({ input: JSON.stringify({ ...input, sslOverride: true }), updatedAt: Date.now() })
+      .where(eq(jobs.id, jobId))
+      .run();
+  }
+
+  void runJob(jobId);
+  return { ok: true };
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -220,6 +262,16 @@ export async function runJob(jobId: string): Promise<void> {
       }
       await configureDatabase(resourceUuid, { isPublic: input.isPublic, publicPort: port });
     });
+
+    // Checkpoint before the first start. Re-read rather than trusting the
+    // configure payload: SSL is not something we can set, only observe.
+    if (!done('start')) {
+      const beforeStart = await getDatabase(resourceUuid);
+      if (!beforeStart.enable_ssl && !input.sslOverride) {
+        setJobStatus(jobId, 'paused', { error: null });
+        return;
+      }
+    }
 
     await step('start', () => startDatabase(resourceUuid));
 
