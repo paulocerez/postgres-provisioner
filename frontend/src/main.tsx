@@ -3,8 +3,12 @@ import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ApiError } from './api/client';
+// Self-hosted so the bundled woff2 is served from our own origin — the CSP has
+// no allowance for a font CDN.
+import '@fontsource-variable/inter';
 import './index.css';
 import { routeTree } from './routeTree.gen';
+import { ThemeProvider } from './theme';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,8 +40,10 @@ if (!rootElement) throw new Error('Missing #root element.');
 
 createRoot(rootElement).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>,
 );

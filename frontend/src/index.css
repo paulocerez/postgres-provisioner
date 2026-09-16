@@ -2,29 +2,194 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * The whole palette lives here as raw RGB channels, once per theme. Components
+ * only ever name semantic tokens (`bg-surface`, `text-muted`, …), which is why
+ * there is not a single `dark:` variant anywhere in the JSX — switching the
+ * `dark` class on <html> reskins the app wholesale.
+ */
+@layer base {
+  :root {
+    --canvas: 252 252 253;
+    --surface: 255 255 255;
+    --raised: 245 245 248;
+    --line: 231 231 236;
+    --line-strong: 213 213 220;
+    --fg: 17 18 22;
+    --muted: 104 107 118;
+    /* Kept at ~4.5:1 on --canvas: `subtle` still carries real data in places
+       (a uuid, an "internal only" port), so it cannot drop to decoration. */
+    --subtle: 112 115 127;
+    --accent: 87 99 205;
+    --accent-hover: 76 88 194;
+    --accent-fg: 255 255 255;
+    --danger: 200 44 52;
+    /* Text on a filled danger button — the fill inverts between themes, so the
+       foreground has to invert with it. */
+    --danger-fg: 255 255 255;
+    --success: 20 124 78;
+    --warning: 146 98 10;
+    --shadow: 15 18 30;
+    color-scheme: light;
+  }
+
+  .dark {
+    --canvas: 8 9 11;
+    --surface: 19 20 24;
+    --raised: 28 29 34;
+    --line: 38 39 45;
+    --line-strong: 56 58 66;
+    --fg: 246 247 249;
+    --muted: 145 148 159;
+    --subtle: 124 127 139;
+    --accent: 126 136 232;
+    --accent-hover: 145 154 240;
+    --accent-fg: 12 13 16;
+    --danger: 245 106 111;
+    --danger-fg: 20 10 11;
+    --success: 76 189 133;
+    --warning: 226 173 74;
+    --shadow: 0 0 0;
+    color-scheme: dark;
+  }
+
+  html {
+    /* Themed here rather than on <body> so the pre-paint script in
+       /theme.js can set the colour before React mounts. */
+    @apply bg-canvas;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-base text-fg antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    font-variation-settings: 'opsz' 32;
+  }
+
+  ::selection {
+    @apply bg-accent/25;
+  }
+
+  /* Tailwind's focus ring is keyboard-only throughout; pointer clicks never
+     paint one. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/60 ring-offset-2 ring-offset-canvas;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
 @layer components {
+  /* --- buttons ------------------------------------------------------------ */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-7 shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2.5 text-sm font-medium transition-colors duration-100 active:translate-y-px disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn border-slate-900 bg-slate-900 text-white hover:bg-slate-700;
+    @apply btn bg-accent text-accent-fg shadow-sm hover:bg-accent-hover;
   }
   .btn-secondary {
-    @apply btn border-slate-300 bg-white text-slate-700 hover:bg-slate-100;
+    @apply btn border-line bg-surface text-fg shadow-sm hover:border-line-strong hover:bg-raised;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-raised hover:text-fg;
   }
   .btn-danger {
-    @apply btn border-red-600 bg-red-600 text-white hover:bg-red-500;
+    @apply btn bg-danger text-danger-fg shadow-sm hover:opacity-90;
   }
+  .btn-icon {
+    @apply h-7 w-7 px-0;
+  }
+  .btn-lg {
+    @apply h-9 px-3.5;
+  }
+
+  /* --- forms -------------------------------------------------------------- */
   .input {
-    @apply w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm outline-none focus:border-slate-900 focus:ring-1 focus:ring-slate-900;
+    @apply w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-fg shadow-sm transition-colors placeholder:text-subtle focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 focus:ring-offset-0 disabled:opacity-50;
   }
   .label {
-    @apply mb-1 block text-sm font-medium text-slate-700;
+    @apply mb-1.5 block text-sm font-medium text-fg;
   }
-  .card {
-    @apply rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
+  .hint {
+    @apply mt-1.5 text-xs text-muted;
   }
   .field-error {
-    @apply mt-1 text-xs text-red-600;
+    @apply mt-1.5 text-xs text-danger;
+  }
+  .checkbox {
+    @apply h-3.5 w-3.5 shrink-0 rounded-[4px] border-line-strong bg-surface text-accent accent-[rgb(var(--accent))];
+  }
+
+  /* --- surfaces ----------------------------------------------------------- */
+  .card {
+    @apply rounded-lg border border-line bg-surface shadow-sm;
+  }
+  .card-header {
+    @apply flex items-center justify-between gap-3 border-b border-line px-4 py-2.5;
+  }
+  .card-title {
+    @apply text-sm font-semibold text-fg;
+  }
+  .card-body {
+    @apply p-4;
+  }
+
+  /* --- badges ------------------------------------------------------------- */
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium;
+  }
+  .badge-neutral {
+    @apply badge border-line bg-raised text-muted;
+  }
+  .badge-success {
+    @apply badge border-success/25 bg-success/10 text-success;
+  }
+  .badge-warning {
+    @apply badge border-warning/25 bg-warning/10 text-warning;
+  }
+  .badge-danger {
+    @apply badge border-danger/25 bg-danger/10 text-danger;
+  }
+  .badge-accent {
+    @apply badge border-accent/25 bg-accent/10 text-accent;
+  }
+
+  /* --- alerts ------------------------------------------------------------- */
+  .alert {
+    @apply flex gap-2.5 rounded-lg border p-3 text-sm;
+  }
+  .alert-danger {
+    @apply alert border-danger/25 bg-danger/[0.07] text-fg;
+  }
+  .alert-warning {
+    @apply alert border-warning/25 bg-warning/[0.07] text-fg;
+  }
+
+  /* --- misc --------------------------------------------------------------- */
+  .kbd {
+    @apply inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-line bg-raised px-1 font-sans text-2xs font-medium tracking-normal text-muted;
+  }
+  .link {
+    @apply text-accent underline-offset-2 hover:underline;
+  }
+  .skeleton {
+    @apply animate-shimmer rounded bg-raised;
+    background-image: linear-gradient(
+      90deg,
+      rgb(var(--raised)) 0%,
+      rgb(var(--line)) 50%,
+      rgb(var(--raised)) 100%
+    );
+    background-size: 200% 100%;
+  }
+  .table-head {
+    @apply border-b border-line bg-raised/60 text-2xs font-medium uppercase text-muted;
   }
 }

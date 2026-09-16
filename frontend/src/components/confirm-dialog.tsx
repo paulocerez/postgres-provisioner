@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from 'react';
+import { Kbd } from './kbd';
 
 /**
  * Every destructive action goes through this. Rendered as a native <dialog> so
@@ -41,12 +42,15 @@ export function ConfirmDialog({
         event.preventDefault();
         onCancel();
       }}
-      className="w-full max-w-md rounded-lg p-0 backdrop:bg-slate-900/40"
+      className="w-full max-w-md animate-slide-up-fade rounded-xl border border-line bg-surface p-0 text-fg shadow-popover backdrop:bg-canvas/70 backdrop:backdrop-blur-sm"
     >
-      <div className="p-5">
-        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-        <div className="mt-3 space-y-3 text-sm text-slate-700">{children}</div>
-        <div className="mt-5 flex justify-end gap-2">
+      <div className="p-4">
+        <h2 className="text-lg font-semibold text-fg">{title}</h2>
+        <div className="mt-2.5 space-y-3 text-sm text-muted">{children}</div>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <span className="mr-auto hidden items-center gap-1.5 text-2xs text-subtle sm:flex">
+            <Kbd>Esc</Kbd> to cancel
+          </span>
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={busy}>
             Cancel
           </button>

@@ -3,9 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Provision and manage Postgres databases on Coolify." />
+    <meta name="theme-color" content="#fcfcfd" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#08090b" media="(prefers-color-scheme: dark)" />
     <title>Postgres Provisioner</title>
+    <!--
+      Applies the stored theme before first paint so a dark-mode reload never
+      flashes white. It is a separate file, not inline, because the server's CSP
+      is `script-src 'self'` with no nonce — an inline script would be blocked.
+    -->
+    <script src="/theme.js"></script>
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased">
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
