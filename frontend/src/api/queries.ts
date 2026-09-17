@@ -1,4 +1,5 @@
 import type {
+  AllowlistEntry,
   AuditEntry,
   CreateDatabaseInput,
   DatabaseDetail,
@@ -146,6 +147,22 @@ export function useUpdateMeta(uuid: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.database(uuid) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.databases });
+    },
+  });
+}
+
+/**
+ * Replaces the whole allowlist and applies it to the Hetzner firewall. The
+ * server rolls its own rows back if the firewall refuses, so a failure here
+ * means nothing changed anywhere — refetching is enough to show the truth.
+ */
+export function useUpdateAllowlist(uuid: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (entries: AllowlistEntry[]) =>
+      apiFetch<{ ok: true }>(`/databases/${uuid}/allowlist`, { method: 'PUT', body: { entries } }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.database(uuid) });
     },
   });
 }
