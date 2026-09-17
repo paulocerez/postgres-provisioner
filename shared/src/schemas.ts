@@ -8,6 +8,13 @@ import { z } from 'zod';
 export const PG_VERSIONS = ['18', '17', '16'] as const;
 export const DB_NAME_PATTERN = /^[a-z0-9-]{3,40}$/;
 
+/**
+ * How many sources one database may allow. Hetzner caps a firewall at 50 rules
+ * and 100 source IPs per rule; this is the far smaller limit that keeps the card
+ * readable, and it is the one the operator will actually meet first.
+ */
+export const MAX_ALLOWLIST_ENTRIES = 20;
+
 /** Coolify's container status, normalised. */
 export const databaseStatusSchema = z.enum([
   'running',
@@ -63,6 +70,160 @@ export const databaseListSchema = z.object({
 });
 export type DatabaseList = z.infer<typeof databaseListSchema>;
 
+// --- firewall allowlist ------------------------------------------------------
+
+/**
+ * Hetzner accepts source IPs in CIDR notation only, and rejects a range whose
+ * host bits are set (`203.0.113.4/24` is an error, not a silent mask). Both
+ * rules are checked here so the operator is told which address they meant
+ * instead of meeting a 422 from an API they never called.
+ */
+export type CidrParse = { ok: true; value: string } | { ok: false; message: string };
+
+export function parseCidr(raw: string): CidrParse {
+  const value = raw.trim().toLowerCase();
+  if (value.length === 0) return { ok: false, message: 'Enter an address, e.g. 203.0.113.4/32.' };
+
+  const slash = value.indexOf('/');
+  if (slash === -1) {
+    return {
+      ok: false,
+      message: value.includes(':')
+        ? 'Add a prefix length — use /128 for a single IPv6 address.'
+        : 'Add a prefix length — use /32 for a single IPv4 address.',
+    };
+  }
+
+  const address = value.slice(0, slash);
+  const prefixText = value.slice(slash + 1);
+  if (!/^\d{1,3}$/.test(prefixText)) {
+    return { ok: false, message: 'The prefix length must be a number, e.g. /32.' };
+  }
+  const prefix = Number(prefixText);
+
+  return address.includes(':')
+    ? parseIpv6Cidr(address, prefix)
+    : parseIpv4Cidr(address, prefix);
+}
+
+function parseIpv4Cidr(address: string, prefix: number): CidrParse {
+  if (prefix > 32) return { ok: false, message: 'An IPv4 prefix must be between /0 and /32.' };
+
+  const octets = address.split('.');
+  if (octets.length !== 4) {
+    return { ok: false, message: 'Not a valid IPv4 address — expected four parts, e.g. 203.0.113.4.' };
+  }
+
+  const numbers: number[] = [];
+  for (const octet of octets) {
+    // Leading zeros are rejected rather than guessed at: `010` is 8 to some
+    // parsers and 10 to others, and an allowlist is the wrong place to be vague.
+    if (!/^(0|[1-9]\d{0,2})$/.test(octet) || Number(octet) > 255) {
+      return { ok: false, message: `"${octet}" is not a valid part of an IPv4 address.` };
+    }
+    numbers.push(Number(octet));
+  }
+
+  const bits = numbers.reduce((acc, n) => acc * 256 + n, 0);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const network = (bits & mask) >>> 0;
+  if (network !== bits) {
+    const suggestion = [24, 16, 8, 0].map((shift) => (network >>> shift) & 0xff).join('.');
+    return {
+      ok: false,
+      message: `Host bits must be zero for a /${prefix}. Did you mean ${suggestion}/${prefix}, or ${address}/32 for just this address?`,
+    };
+  }
+
+  return { ok: true, value: `${numbers.join('.')}/${prefix}` };
+}
+
+function parseIpv6Cidr(address: string, prefix: number): CidrParse {
+  if (prefix > 128) return { ok: false, message: 'An IPv6 prefix must be between /0 and /128.' };
+
+  const halves = address.split('::');
+  if (halves.length > 2) {
+    return { ok: false, message: 'An IPv6 address may contain "::" at most once.' };
+  }
+
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const groups = halves.length === 2 ? head.length + tail.length : head.length;
+  if (halves.length === 1 ? groups !== 8 : groups > 7) {
+    return { ok: false, message: 'Not a valid IPv6 address.' };
+  }
+
+  const parts = [...head, ...new Array(8 - groups).fill('0'), ...tail];
+  const words: number[] = [];
+  for (const part of parts) {
+    // An embedded IPv4 tail (::ffff:1.2.3.4) is deliberately unsupported —
+    // write it as the IPv4 range instead.
+    if (!/^[0-9a-f]{1,4}$/.test(part)) {
+      return { ok: false, message: `"${part}" is not a valid group of an IPv6 address.` };
+    }
+    words.push(Number.parseInt(part, 16));
+  }
+
+  let remaining = prefix;
+  const network = words.map((word) => {
+    const take = Math.min(16, Math.max(0, remaining));
+    remaining -= take;
+    const mask = take === 0 ? 0 : (0xffff << (16 - take)) & 0xffff;
+    return word & mask;
+  });
+  if (network.some((word, i) => word !== words[i])) {
+    const suggestion = network.map((word) => word.toString(16)).join(':');
+    return {
+      ok: false,
+      message: `Host bits must be zero for a /${prefix}. Did you mean ${suggestion}/${prefix}, or ${address}/128 for just this address?`,
+    };
+  }
+
+  return { ok: true, value: `${words.map((word) => word.toString(16)).join(':')}/${prefix}` };
+}
+
+/** Normalised on both sides, so the stored value is the one Hetzner is sent. */
+export const cidrSchema = z
+  .string()
+  .superRefine((value, ctx) => {
+    const parsed = parseCidr(value);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.message });
+    }
+  })
+  .transform((value) => {
+    const parsed = parseCidr(value);
+    return parsed.ok ? parsed.value : value;
+  });
+
+export const allowlistEntrySchema = z.object({
+  cidr: cidrSchema,
+  label: z.string().trim().max(60, 'Keep the label under 60 characters.').nullable(),
+});
+export type AllowlistEntry = z.infer<typeof allowlistEntrySchema>;
+
+/**
+ * Replaces the whole list in one request — the firewall is written as a whole
+ * anyway, so a per-entry API would only invent states that cannot exist.
+ */
+export const allowlistPutSchema = z
+  .object({
+    entries: z
+      .array(allowlistEntrySchema)
+      .max(MAX_ALLOWLIST_ENTRIES, `Up to ${MAX_ALLOWLIST_ENTRIES} sources per database.`),
+  })
+  .transform(({ entries }) => {
+    const seen = new Set<string>();
+    return {
+      entries: entries.filter((entry) => {
+        if (seen.has(entry.cidr)) return false;
+        seen.add(entry.cidr);
+        return true;
+      }),
+    };
+  });
+export type AllowlistPutInput = { entries: AllowlistEntry[] };
+
 /** Full detail, only served by GET /api/databases/:uuid (contains the password). */
 export const databaseDetailSchema = databaseSchema.extend({
   internalUrl: z.string().nullable(),
@@ -79,6 +240,17 @@ export const databaseDetailSchema = databaseSchema.extend({
       lastRunStatus: z.string().nullable(),
     })
     .nullable(),
+  allowlist: z.array(allowlistEntrySchema),
+  /**
+   * `conflictingRule` describes a firewall rule this app does not own that also
+   * covers this database's port. While one exists the allowlist can only widen
+   * access, never narrow it, and the UI has to say so.
+   */
+  firewall: z.object({
+    managed: z.boolean(),
+    reachable: z.boolean(),
+    conflictingRule: z.string().nullable(),
+  }),
 });
 export type DatabaseDetail = z.infer<typeof databaseDetailSchema>;
 
@@ -182,6 +354,8 @@ export const metaResponseSchema = z.object({
   publicHost: z.string(),
   portRange: z.object({ start: z.number(), end: z.number() }),
   backupsSupported: z.boolean(),
+  /** False when HCLOUD_TOKEN/HCLOUD_FIREWALL_ID are unset: no allowlist UI. */
+  firewallEnabled: z.boolean(),
   defaultImage: z.string(),
 });
 export type MetaResponse = z.infer<typeof metaResponseSchema>;
@@ -196,6 +370,7 @@ export const auditActionSchema = z.enum([
   'login_failed',
   'meta_update',
   'meta_remove',
+  'allowlist_update',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

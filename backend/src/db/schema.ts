@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 /**
  * Local state only. Coolify stays the source of truth for the *state* of each
@@ -47,6 +47,28 @@ export const databaseMeta = sqliteTable('database_meta', {
   createdAt: integer('created_at').notNull(),
 });
 
+/**
+ * Sources allowed to reach a database's public port. This is the desired state;
+ * `firewall.ts` reconciles it into real Hetzner rules, so a row here is a claim
+ * about what should be open, never a record of what is.
+ */
+export const databaseAllowlist = sqliteTable(
+  'database_allowlist',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    coolifyUuid: text('coolify_uuid').notNull(),
+    /** Normalised CIDR — see `parseCidr` in shared/schemas.ts. */
+    cidr: text('cidr').notNull(),
+    label: text('label'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    uuidIdx: index('database_allowlist_uuid_idx').on(table.coolifyUuid),
+    uniqueCidr: uniqueIndex('database_allowlist_uuid_cidr_idx').on(table.coolifyUuid, table.cidr),
+  }),
+);
+
 export const auditLog = sqliteTable(
   'audit_log',
   {
@@ -67,4 +89,5 @@ export const auditLog = sqliteTable(
 export type SessionRow = typeof sessions.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type DatabaseMetaRow = typeof databaseMeta.$inferSelect;
+export type DatabaseAllowlistRow = typeof databaseAllowlist.$inferSelect;
 export type AuditLogRow = typeof auditLog.$inferSelect;

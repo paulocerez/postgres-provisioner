@@ -6,6 +6,15 @@ import { z } from 'zod';
  * failure with a readable message rather than an `undefined` at 3am.
  */
 
+/**
+ * An optional variable that a host left blank is unset, not invalid. Coolify's
+ * environment editor writes an empty string for a variable you create and never
+ * fill in, and failing to boot over one is an unhelpful way to find out.
+ */
+function blankAsUnset<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
+}
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -22,6 +31,19 @@ const envSchema = z
     PORT_RANGE_START: z.coerce.number().int().min(1).max(65535).default(5432),
     PORT_RANGE_END: z.coerce.number().int().min(1).max(65535).default(5441),
     DEFAULT_PG_IMAGE: z.string().default('postgres:18-alpine'),
+
+    /**
+     * Both optional, and only useful together: without them the per-database
+     * allowlist is hidden and no Hetzner call is ever made. The token needs
+     * read *and* write, because applying an allowlist rewrites firewall rules.
+     */
+    HCLOUD_TOKEN: blankAsUnset(z.string().min(1)),
+    HCLOUD_FIREWALL_ID: blankAsUnset(
+      z.coerce
+        .number()
+        .int()
+        .positive('the numeric id of the firewall, from its URL in the Hetzner console'),
+    ),
 
     ADMIN_EMAIL: z.string().email('must be a valid email address'),
     /**
@@ -46,6 +68,11 @@ const envSchema = z
   .refine((v) => v.PORT_RANGE_START <= v.PORT_RANGE_END, {
     message: 'PORT_RANGE_START must be less than or equal to PORT_RANGE_END',
     path: ['PORT_RANGE_START'],
+  })
+  .refine((v) => Boolean(v.HCLOUD_TOKEN) === Boolean(v.HCLOUD_FIREWALL_ID), {
+    message:
+      'set both HCLOUD_TOKEN and HCLOUD_FIREWALL_ID, or neither. Half-configured, the allowlist would look available and never apply.',
+    path: ['HCLOUD_FIREWALL_ID'],
   });
 
 export type Env = z.infer<typeof envSchema>;
@@ -68,6 +95,13 @@ function load(): Env {
 
 export const env = load();
 export const isProduction = env.NODE_ENV === 'production';
+
+/**
+ * Whether this deployment manages the Hetzner firewall. Everything to do with
+ * per-database allowlists keys off this: the card is hidden, the detail payload
+ * says so, and no outbound call is made when it is false.
+ */
+export const firewallManaged = Boolean(env.HCLOUD_TOKEN && env.HCLOUD_FIREWALL_ID);
 
 /**
  * Whether the app is actually reachable over TLS, which is a different question

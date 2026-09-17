@@ -7,6 +7,7 @@ import {
   useDeleteDatabase,
   useLifecycleAction,
 } from '../../api/queries';
+import { AllowlistCard } from '../../components/allowlist-card';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { ConnectionString } from '../../components/connection-string';
 import { ErrorBanner } from '../../components/error-banner';
@@ -180,7 +181,9 @@ function DatabaseDetailPage() {
             value={data.publicUrl}
             hint={
               data.publicUrl
-                ? `Host ${meta.data?.publicHost ?? ''} — only reachable from IPs the Hetzner firewall allows.`
+                ? data.firewall.managed
+                  ? `Host ${meta.data?.publicHost ?? ''} — reachable only from the sources allowed below.`
+                  : `Host ${meta.data?.publicHost ?? ''} — only reachable from IPs the Hetzner firewall allows.`
                 : undefined
             }
           />
@@ -191,6 +194,22 @@ function DatabaseDetailPage() {
           />
         </div>
       </section>
+
+      {/*
+        Only for public databases: an internal-only one never passes through the
+        firewall, so an allowlist would be a control that does nothing.
+        The key re-seeds the card's local list after a successful save, without
+        clobbering an in-progress edit — the detail query does not poll.
+      */}
+      {data.firewall.managed && data.isPublic && (
+        <AllowlistCard
+          key={data.allowlist.map((entry) => entry.cidr).join(',')}
+          uuid={uuid}
+          entries={data.allowlist}
+          conflictingRule={data.firewall.conflictingRule}
+          reachable={data.firewall.reachable}
+        />
+      )}
 
       <section className="card">
         <div className="card-header">
