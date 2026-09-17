@@ -15,6 +15,13 @@
       "when": 1789506078632,
       "tag": "0001_lethal_marrow",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789677213369,
+      "tag": "0002_sparkling_meggan",
+      "breakpoints": true
     }
   ]
 }

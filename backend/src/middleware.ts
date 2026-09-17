@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { redactString } from './audit.js';
 import { CoolifyError } from './coolify.js';
 import { env } from './env.js';
+import { HetznerError } from './hetzner.js';
 import { PortRangeExhaustedError } from './ports.js';
 
 /** Nothing under /api is ever cacheable — several responses contain passwords. */
@@ -78,6 +79,14 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(502).json({
       error: { message: err.message, coolifyStatus: err.status || undefined },
     });
+    return;
+  }
+
+  if (err instanceof HetznerError) {
+    console.error(`[hetzner] ${err.status} ${err.endpoint}: ${err.body}`);
+    // Same reasoning as Coolify: the failure is upstream. The message already
+    // names the cause (bad token, wrong firewall id, rate limit).
+    res.status(502).json({ error: { message: err.message } });
     return;
   }
 
