@@ -1,7 +1,7 @@
 import type { MetaResponse } from '@app/shared';
 import { Router } from 'express';
 import { ensureResolved, getResolved } from '../coolify.js';
-import { env } from '../env.js';
+import { env, firewallManaged } from '../env.js';
 import { asyncHandler } from '../middleware.js';
 
 export const metaRouter: Router = Router();
@@ -29,6 +29,7 @@ metaRouter.get(
       publicHost: env.PUBLIC_HOST,
       portRange: { start: env.PORT_RANGE_START, end: env.PORT_RANGE_END },
       backupsSupported: resolved?.backupsSupported ?? false,
+      firewallEnabled: firewallManaged,
       defaultImage: env.DEFAULT_PG_IMAGE,
     };
     res.json(body);

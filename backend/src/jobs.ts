@@ -22,6 +22,7 @@ import {
 import { db } from './db/client.js';
 import { databaseMeta, jobs } from './db/schema.js';
 import { env } from './env.js';
+import { reconcileFirewall } from './firewall.js';
 import { allocatePort } from './ports.js';
 
 /**
@@ -345,6 +346,14 @@ export async function runJob(jobId: string): Promise<void> {
         // so a default that changes under us is visible after the fact.
         sslEnabled: Boolean(final.enable_ssl),
       },
+    });
+
+    // A new database has no allowlist, so this grants nothing. It *revokes*:
+    // if a previous database on this port left a rule behind (a delete whose
+    // reconcile failed), the port would otherwise still be open to whoever the
+    // old database allowed. Best effort — the create itself already succeeded.
+    await reconcileFirewall().catch((err: unknown) => {
+      console.error('[firewall] could not reconcile after create:', err);
     });
   } catch (err) {
     const failing: JobStepName | null = current;

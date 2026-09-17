@@ -240,6 +240,17 @@ export const databaseDetailSchema = databaseSchema.extend({
       lastRunStatus: z.string().nullable(),
     })
     .nullable(),
+  allowlist: z.array(allowlistEntrySchema),
+  /**
+   * `conflictingRule` describes a firewall rule this app does not own that also
+   * covers this database's port. While one exists the allowlist can only widen
+   * access, never narrow it, and the UI has to say so.
+   */
+  firewall: z.object({
+    managed: z.boolean(),
+    reachable: z.boolean(),
+    conflictingRule: z.string().nullable(),
+  }),
 });
 export type DatabaseDetail = z.infer<typeof databaseDetailSchema>;
 
@@ -343,6 +354,8 @@ export const metaResponseSchema = z.object({
   publicHost: z.string(),
   portRange: z.object({ start: z.number(), end: z.number() }),
   backupsSupported: z.boolean(),
+  /** False when HCLOUD_TOKEN/HCLOUD_FIREWALL_ID are unset: no allowlist UI. */
+  firewallEnabled: z.boolean(),
   defaultImage: z.string(),
 });
 export type MetaResponse = z.infer<typeof metaResponseSchema>;
@@ -357,6 +370,7 @@ export const auditActionSchema = z.enum([
   'login_failed',
   'meta_update',
   'meta_remove',
+  'allowlist_update',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 
