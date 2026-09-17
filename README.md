@@ -6,8 +6,8 @@ Hetzner server.
 
 It is a thin wrapper around the Coolify REST API. Coolify remains the source of
 truth for the state of every database; this app's own SQLite holds only sessions,
-create-job progress, an audit log, and per-database notes Coolify has nowhere to
-put.
+create-job progress, an audit log, per-database notes Coolify has nowhere to put,
+and the firewall allowlists described below.
 
 What it does that clicking through Coolify does not:
 
@@ -15,6 +15,7 @@ What it does that clicking through Coolify does not:
 - stops before the first start if Coolify made the database without SSL, which is
   the last moment enabling it still takes effect,
 - schedules the daily S3 backup,
+- optionally manages who may reach each database, as real Hetzner firewall rules,
 - and hands you a working `psql` connection string at the end.
 
 ## Stack
@@ -47,7 +48,7 @@ Other scripts:
 
 ```bash
 npm run build       # shared → frontend → backend
-npm test            # port-allocation unit tests
+npm test            # port allocation, CIDR parsing, firewall rule ownership
 npm run typecheck   # all three workspaces
 npm run db:generate # regenerate drizzle/ after editing backend/src/db/schema.ts
 ```
@@ -174,6 +175,35 @@ Two things worth knowing:
 If the server restarts mid-create, `resumeRunningJobs()` re-checks the job against
 Coolify on boot and either resumes from the first unfinished step or fails it with
 a clear message. A job is never left stuck in `running`.
+
+## Firewall allowlists
+
+Optional, and off unless `HCLOUD_TOKEN` and `HCLOUD_FIREWALL_ID` are both set —
+without them nothing here runs and no Hetzner call is ever made. With them, each
+public database gets a list of allowed CIDRs which `backend/src/firewall.ts`
+reconciles into inbound rules on one Hetzner Cloud firewall.
+
+The design is dominated by one property of the API: `set_rules` replaces the
+firewall's *entire* rule set. There is no add-one-rule endpoint and no
+compare-and-swap, so every write is a read-modify-write. Hence:
+
+- **Narrow ownership.** A rule belongs to this app only if it is inbound TCP,
+  its port is a single port inside `PORT_RANGE`, *and* its description is
+  `pgp:<database-uuid>`. Everything else — SSH, HTTP, anything added by hand — is
+  copied through untouched. Getting this wrong locks you out of your own server.
+- **The corollary, which the UI states on the affected database.** A hand-written
+  rule that opens the port range carries no `pgp:` description, so it survives,
+  and it keeps the port open to whoever it allows. Until it is deleted in the
+  console an allowlist can only widen access, never restrict it.
+- **Reconciles are serialised** behind an in-flight promise, and skipped entirely
+  when the desired rules already match — no pointless writes.
+- **SQLite never claims access the firewall does not grant.** The rows are
+  written first (the desired rules are derived from them), and restored if
+  Hetzner then refuses the change.
+- An empty list produces no rule at all: the port is shut, not open.
+
+The desired port for each rule comes from Coolify, not from SQLite, so applying
+an allowlist needs Coolify reachable as well.
 
 ## Security
 

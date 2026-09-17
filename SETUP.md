@@ -223,6 +223,8 @@ Then set these in Coolify → Environment Variables:
 | `PUBLIC_HOST` | `1.2.3.4` | Host used in connection strings handed to applications. Deliberately **not** derived from `COOLIFY_URL`. |
 | `PORT_RANGE_START` / `_END` | `5432` / `5441` | Host ports the app may allocate. **Your firewall must already allow this range.** |
 | `DEFAULT_PG_IMAGE` | `postgres:18-alpine` | |
+| `HCLOUD_TOKEN` | `abc…` | Optional; enables per-database IP allowlists. Mark secret. See step 13. |
+| `HCLOUD_FIREWALL_ID` | `1234567` | Optional; required with `HCLOUD_TOKEN`. |
 | `ADMIN_EMAIL` | `you@example.com` | The only account |
 | `ADMIN_PASSWORD_HASH` | `$2a$12$…` | Mark secret. **See the warning below.** |
 | `SESSION_SECRET` | 64 hex chars | Signs the session cookie. Mark secret. |
@@ -394,6 +396,42 @@ on the day you need it.
 
 ---
 
+## 13. Per-database IP allowlists (optional)
+
+Without this, the ports in `PORT_RANGE` are opened once in the Hetzner console
+and every provisioned database is reachable by whoever that rule allows. Set the
+two variables below and each database instead gets its own **Allowed sources**
+card: a list of CIDRs, applied to a real firewall rule when you save.
+
+1. Hetzner Cloud console → **Firewalls** → create one (or use an existing one)
+   and **attach it to the server**. Keep your SSH and HTTP rules; this app
+   preserves every rule it does not own.
+2. Copy the numeric id out of the firewall's URL →  `HCLOUD_FIREWALL_ID`.
+3. Security → **API tokens** → generate one with **Read & Write** →
+   `HCLOUD_TOKEN`. Mark it secret. Read-only is not enough: applying an
+   allowlist rewrites rules.
+4. Redeploy. The card appears on every public database's page.
+
+**Then delete the broad `5432-5441` rule.** This is the step that matters. The
+app only owns inbound TCP rules that sit inside `PORT_RANGE` *and* carry a
+`pgp:<uuid>` description, so your hand-written range rule is left alone — and
+keeps every port open to whatever it allows. Until it is gone, an allowlist can
+only widen access, never restrict it. The UI says so on any database whose port
+is covered by a rule it does not own.
+
+A few properties worth knowing:
+
+- An empty list means **no rule at all** — the port is shut, not open. The UI
+  confirms before saving that.
+- Internal-only databases have no card: they never pass through the firewall.
+- Hetzner's API replaces the whole rule set on every write, and has no
+  compare-and-swap. If you edit rules in the console while a save is in flight,
+  last write wins. Edits from this app are serialised among themselves.
+- If Hetzner refuses a change, the app restores its own rows — the list you see
+  never claims access the firewall does not grant.
+
+---
+
 ## Troubleshooting
 
 Every one of these was hit during the first real deployment.
@@ -411,6 +449,9 @@ Every one of these was hit during the first real deployment.
 | Coolify's browser terminal hangs at "connecting…" | Its websocket relay does not work on a plain-HTTP instance | Use SSH and `docker exec` |
 | Database list shows an error banner instead of databases | Coolify unreachable or rejecting the token | The banner quotes Coolify's own message and status code — read it. |
 | Everything works but a database shows "password not recoverable" | It was created outside this app | Expected. Coolify never discloses passwords; only databases this app created have a stored one. |
+| Allowed sources saved, but anyone can still connect | A hand-written firewall rule still covers the port | Step 13 — delete the broad `5432-5441` rule. The card warns when it finds one. |
+| No **Allowed sources** card on a public database | `HCLOUD_TOKEN`/`HCLOUD_FIREWALL_ID` unset, or the database is internal-only | Step 13. The app refuses to boot if only one of the two is set. |
+| Saving an allowlist returns 502 | Token lacks write permission, wrong firewall id, or Hetzner rate limit | The message names which. Nothing was changed on either side. |
 
 ---
 
