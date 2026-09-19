@@ -3,6 +3,9 @@
 A step-by-step walkthrough for someone who has a Coolify server and wants this
 app running against it. It assumes no prior knowledge of the codebase.
 
+If the app is already running and you just need a database for a project, you
+want [USAGE.md](USAGE.md) instead.
+
 Roughly 30–45 minutes, most of which is waiting for Docker builds.
 
 Every step says **why** it exists, because several of them look optional and are
@@ -353,6 +356,10 @@ psql "postgres://postgres:PASSWORD@YOUR_HOST:5433/yourname_db?sslmode=require"
 ```
 
 If that connects over TLS, you are done.
+
+That command proves the app works. Pointing a real application at a database —
+internal versus public, the `.env` line, the allowlist entry — is
+[USAGE.md](USAGE.md).
 
 ---
 

@@ -18,6 +18,10 @@ What it does that clicking through Coolify does not:
 - optionally manages who may reach each database, as real Hetzner firewall rules,
 - and hands you a working `psql` connection string at the end.
 
+Three documents, by audience: **[USAGE.md](USAGE.md)** if you have a project that
+needs a database, **[SETUP.md](SETUP.md)** if you are hosting this app on your own
+Coolify instance, and the rest of this file if you are changing its code.
+
 ## Stack
 
 npm workspaces: `shared/` (zod schemas used by both sides), `backend/`
