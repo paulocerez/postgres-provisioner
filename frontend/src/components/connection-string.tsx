@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useToast } from './toaster';
+import { useRef, useState } from 'react';
+import { useCopy } from '../hooks/use-copy';
 import { CopyIcon, EyeIcon, EyeOffIcon } from './icons';
 
 /**
@@ -16,7 +16,8 @@ export function ConnectionString({
   hint?: string;
 }) {
   const [revealed, setRevealed] = useState(false);
-  const notify = useToast();
+  const preRef = useRef<HTMLPreElement>(null);
+  const copy = useCopy();
 
   if (!value) {
     return (
@@ -29,15 +30,21 @@ export function ConnectionString({
     );
   }
 
-  const copy = async (text: string, what: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      notify(`${what} copied to the clipboard.`);
-    } catch {
-      // Clipboard access is denied over plain http on some browsers; saying so
-      // beats a button that silently does nothing.
-      notify('The browser blocked clipboard access.', 'error');
-    }
+  // Last resort when the browser refuses every clipboard path: unmask the string
+  // and select it, so ⌘C still gets the operator what they came for. The reveal
+  // has to paint before the range is taken, hence the frame.
+  const selectValue = () => {
+    setRevealed(true);
+    requestAnimationFrame(() => {
+      const node = preRef.current;
+      const selection = window.getSelection();
+      if (!node || !selection) return;
+
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
   };
 
   return (
@@ -57,7 +64,7 @@ export function ConnectionString({
           <button
             type="button"
             className="btn-ghost btn-icon"
-            onClick={() => void copy(value, 'Connection string')}
+            onClick={() => void copy(value, 'Connection string', selectValue)}
             title="Copy the connection string"
             aria-label="Copy the connection string"
           >
@@ -67,13 +74,16 @@ export function ConnectionString({
             type="button"
             className="btn-ghost"
             title="Copy as a DATABASE_URL= line for a .env file"
-            onClick={() => void copy(`DATABASE_URL=${value}`, 'DATABASE_URL line')}
+            onClick={() => void copy(`DATABASE_URL=${value}`, 'DATABASE_URL line', selectValue)}
           >
             .env
           </button>
         </div>
       </div>
-      <pre className="mt-1.5 overflow-x-auto rounded-md border border-line bg-raised px-3 py-2.5 font-mono text-xs text-fg">
+      <pre
+        ref={preRef}
+        className="mt-1.5 overflow-x-auto rounded-md border border-line bg-raised px-3 py-2.5 font-mono text-xs text-fg"
+      >
         {revealed ? value : value.replace(/:\/\/([^:]+):[^@]*@/, '://$1:••••••••@')}
       </pre>
       {hint && <p className="hint">{hint}</p>}
