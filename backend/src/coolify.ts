@@ -1,7 +1,8 @@
-import type {
-  Database as NormalisedDatabase,
-  DatabaseMeta,
-  DatabaseStatus,
+import {
+  type Database as NormalisedDatabase,
+  type DatabaseMeta,
+  type DatabaseStatus,
+  coolifyDatabasePath,
 } from '@app/shared';
 import { redactString } from './audit.js';
 import { env } from './env.js';
@@ -475,15 +476,17 @@ export async function lastBackupExecution(
 }
 
 /**
- * Deep link into the Coolify UI for a database. Falls back to the Coolify root
- * when the project has not been resolved — a slightly worse link is better than
- * failing the whole details page over a hyperlink.
+ * Deep link into the Coolify UI for a database. `environmentUuid` is the
+ * database's own environment (`RawDatabase.environment.uuid`) when the caller
+ * has the raw payload to hand; without it, the resolved environment is assumed.
  */
-export function coolifyDatabaseUrl(uuid: string): string {
-  const base = env.COOLIFY_URL.replace(/\/$/, '');
-  const projectUuid = resolved?.projectUuid;
-  if (!projectUuid) return base;
-  return `${base}/project/${projectUuid}/${env.COOLIFY_ENVIRONMENT}/database/${uuid}`;
+export function coolifyDatabaseUrl(uuid: string, environmentUuid?: string | null): string {
+  return coolifyDatabasePath(
+    env.COOLIFY_URL,
+    resolved?.projectUuid,
+    environmentUuid ?? resolved?.environmentUuid,
+    uuid,
+  );
 }
 
 // --- normalisation ----------------------------------------------------------

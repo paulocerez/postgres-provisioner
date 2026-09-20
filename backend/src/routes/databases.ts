@@ -130,7 +130,7 @@ databasesRouter.get(
       postgresUser: raw.postgres_user ?? null,
       postgresDb: raw.postgres_db ?? null,
       postgresPassword: password,
-      coolifyUrl: coolifyDatabaseUrl(uuid),
+      coolifyUrl: coolifyDatabaseUrl(uuid, raw.environment?.uuid),
       backup: schedule
         ? {
             enabled: Boolean(schedule.enabled),

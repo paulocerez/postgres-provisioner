@@ -351,6 +351,8 @@ export const metaResponseSchema = z.object({
   projectName: z.string().nullable(),
   projectUuid: z.string().nullable(),
   environment: z.string(),
+  /** Needed for Coolify deep links, which match the environment by uuid. */
+  environmentUuid: z.string().nullable(),
   publicHost: z.string(),
   portRange: z.object({ start: z.number(), end: z.number() }),
   backupsSupported: z.boolean(),

@@ -26,6 +26,7 @@ metaRouter.get(
       projectName: resolved?.projectName ?? null,
       projectUuid: resolved?.projectUuid ?? null,
       environment: env.COOLIFY_ENVIRONMENT,
+      environmentUuid: resolved?.environmentUuid ?? null,
       publicHost: env.PUBLIC_HOST,
       portRange: { start: env.PORT_RANGE_START, end: env.PORT_RANGE_END },
       backupsSupported: resolved?.backupsSupported ?? false,

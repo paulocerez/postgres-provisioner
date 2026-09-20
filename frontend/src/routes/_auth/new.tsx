@@ -1,6 +1,7 @@
 import {
   PG_VERSIONS,
   type CreateDatabaseInput,
+  coolifyDatabasePath,
   createDatabaseSchema,
   imageForVersion,
   normaliseDatabaseName,
@@ -333,7 +334,12 @@ function CreateProgress({ jobId }: { jobId: string }) {
               job={job.data}
               coolifyUrl={
                 job.data.result && meta.data
-                  ? `${meta.data.coolifyUrl}/project/${meta.data.projectUuid}/${meta.data.environment}/database/${job.data.result.uuid}`
+                  ? coolifyDatabasePath(
+                      meta.data.coolifyUrl,
+                      meta.data.projectUuid,
+                      meta.data.environmentUuid,
+                      job.data.result.uuid,
+                    )
                   : undefined
               }
             />
