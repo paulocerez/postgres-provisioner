@@ -220,6 +220,7 @@ function DatabaseDetailPage() {
           links={data.links}
           hasPassword={data.postgresPassword !== null}
           gatewayAvailable={data.gatewayUrl !== null}
+          publicAvailable={data.publicUrl !== null}
         />
       )}
 

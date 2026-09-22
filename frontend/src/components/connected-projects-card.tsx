@@ -26,11 +26,14 @@ export function ConnectedProjectsCard({
   links,
   hasPassword,
   gatewayAvailable,
+  publicAvailable,
 }: {
   uuid: string;
   links: ProjectLink[];
   hasPassword: boolean;
   gatewayAvailable: boolean;
+  /** Whether this database has a host port at all — false for internal-only. */
+  publicAvailable: boolean;
 }) {
   const link = useLinkProject(uuid);
   const unlink = useUnlinkProject(uuid);
@@ -46,6 +49,12 @@ export function ConnectedProjectsCard({
   const [forgetting, setForgetting] = useState<ProjectLink | null>(null);
 
   const chosen = projects.data?.projects.find((p) => p.id === projectId);
+  /*
+    An internal-only database with no gateway has no string that would work off
+    this server. The push refuses it, but saying so before the operator fills
+    the form in is the difference between a hint and an error message.
+  */
+  const reachable = gatewayAvailable || publicAvailable;
 
   function submit() {
     const key = envKeySchema.safeParse(envKey);
@@ -99,6 +108,18 @@ export function ConnectedProjectsCard({
         </div>
       )}
 
+      {hasPassword && !reachable && (
+        <div className="px-4 pt-4">
+          <div role="alert" className="alert-warning">
+            <AlertIcon className="mt-0.5 shrink-0 text-warning" />
+            <p className="text-muted">
+              This database is internal-only and no TLS gateway is configured, so it has no
+              connection string that would work from off this server. Nothing to connect yet.
+            </p>
+          </div>
+        </div>
+      )}
+
       {links.length === 0 ? (
         <EmptyState
           title="Not connected to anything"
@@ -144,7 +165,7 @@ export function ConnectedProjectsCard({
           <button
             type="button"
             className="btn-secondary gap-1.5"
-            disabled={!hasPassword}
+            disabled={!hasPassword || !reachable}
             onClick={() => setPicking(true)}
           >
             <PlusIcon />
