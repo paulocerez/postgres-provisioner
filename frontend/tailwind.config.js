@@ -18,9 +18,16 @@ export default {
         line: token('line'),
         'line-strong': token('line-strong'),
         fg: token('fg'),
-        muted: token('muted'),
+        // `DEFAULT` keeps every existing `text-muted`; `foreground` is the name
+        // shadcn's primitives reach for. Note this token is a text grey, not a
+        // surface — `bg-muted` is a mistake, `bg-raised` is the surface.
+        muted: { DEFAULT: token('muted'), foreground: token('muted') },
         subtle: token('subtle'),
         accent: {
+          // Still the brand indigo. shadcn uses `accent` to mean "subtle hover
+          // surface" instead; those class names are rewritten to raised/fg in
+          // src/components/ui rather than moved here, so `bg-accent` keeps
+          // meaning one thing across the app.
           DEFAULT: token('accent'),
           hover: token('accent-hover'),
           fg: token('accent-fg'),
@@ -28,6 +35,23 @@ export default {
         danger: { DEFAULT: token('danger'), fg: token('danger-fg') },
         success: token('success'),
         warning: token('warning'),
+
+        /*
+          shadcn/ui names colours its own way. Rather than carry a second HSL
+          palette in index.css, each of its names is an alias for a token that
+          already exists — so there is still exactly one palette, declared once
+          per theme, and still not a single `dark:` variant.
+        */
+        background: token('canvas'),
+        foreground: token('fg'),
+        card: { DEFAULT: token('surface'), foreground: token('fg') },
+        popover: { DEFAULT: token('surface'), foreground: token('fg') },
+        primary: { DEFAULT: token('accent'), foreground: token('accent-fg') },
+        secondary: { DEFAULT: token('raised'), foreground: token('fg') },
+        destructive: { DEFAULT: token('danger'), foreground: token('danger-fg') },
+        border: token('line'),
+        input: token('line'),
+        ring: token('accent'),
       },
       fontFamily: {
         sans: ['Inter Variable', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
