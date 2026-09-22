@@ -10,6 +10,7 @@ import { ConfirmDialog } from './confirm-dialog';
 import { EmptyState } from './empty-state';
 import { ErrorBanner } from './error-banner';
 import { AlertIcon, PlusIcon, TrashIcon } from './icons';
+import { ProjectCombobox } from './project-combobox';
 import { useToast } from './toaster';
 
 /**
@@ -175,28 +176,22 @@ export function ConnectedProjectsCard({
           <>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
               <div className="flex-1">
-                <label className="label" htmlFor="link-project">
+                <label className="label" id="link-project-label" htmlFor="link-project">
                   Project
                 </label>
-                <select
+                <ProjectCombobox
                   id="link-project"
-                  className="input"
+                  labelId="link-project-label"
                   value={projectId}
-                  disabled={projects.isPending}
-                  onChange={(event) => {
-                    setProjectId(event.target.value);
+                  onChange={(next) => {
+                    setProjectId(next);
                     setFormError(null);
                   }}
-                >
-                  <option value="">
-                    {projects.isPending ? 'Loading projects…' : 'Choose a project'}
-                  </option>
-                  {projects.data?.projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
+                  projects={projects.data?.projects ?? []}
+                  loading={projects.isPending}
+                  // Nothing to pick from behind the error banner below.
+                  disabled={projects.isError}
+                />
               </div>
               <div className="sm:w-52">
                 <label className="label" htmlFor="link-env-key">
