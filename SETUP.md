@@ -463,62 +463,165 @@ ALPN protocol — that is what the route matches.
 What you get: `sslmode=verify-full` against a real Let's Encrypt certificate,
 **no Postgres port opened at all**, and databases that can stay `internal`.
 
-1. DNS: `A pg.<your-domain> → <your server IP>`. It can be the same IP as the
-   app's domain; the two are told apart by SNI.
-2. Set `PG_GATEWAY_HOST=pg.<your-domain>` in the application's environment.
-   Leave `PGPROXY_PORT` at `5433` unless it collides with your `PORT_RANGE`.
-3. Coolify → the application → **Ports Mappings** → `127.0.0.1:5433:5433`.
-   **The `127.0.0.1:` prefix is the whole point.** Mapped as `5433:5433` the
-   gateway is on the public internet with no TLS in front of it, which is
-   strictly worse than the thing you are replacing.
-4. Write `/data/coolify/proxy/dynamic/pg.yaml` on the server:
+### 14.1 A hostname
 
-   ```yaml
-   tcp:
-     routers:
-       pgp:
-         entryPoints: [https]
-         rule: "HostSNI(`pg.<your-domain>`)"
-         tls:
-           certResolver: letsencrypt
-           options: pg-alpn
-         service: pgp
-     services:
-       pgp:
-         loadBalancer:
-           servers:
-             - address: "host.docker.internal:5433"
-   tls:
-     options:
-       pg-alpn:
-         alpnProtocols: ["postgresql"]
-   ```
+You need a DNS name; a bare IP cannot hold a certificate, and SNI routing has
+nothing to match without one.
 
-   Two things here are load-bearing. **`alpnProtocols`** must include
-   `postgresql`; Traefik's default TCP set does not, and without it the
-   handshake completes and then hangs rather than failing with anything you
-   could search for. And **`host.docker.internal`** must actually resolve inside
-   the proxy container — check with
-   `docker exec coolify-proxy getent hosts host.docker.internal` before you rely
-   on it, and use a network alias if it does not.
-5. Redeploy. The log line `[pg-gateway] listening on :5433 for pg.<domain>`
-   means the listener is up.
+If you do not own a domain, **DuckDNS** works and is free. It is on the Public
+Suffix List, so each subdomain gets its own Let's Encrypt rate limit — which is
+what makes it usable rather than a trap.
 
-Verify the route before touching any client code:
+Do **not** reuse the `sslip.io` name Coolify generates. It resolves fine, but
+sslip.io is *not* on the Public Suffix List, so every sslip.io name on the
+internet shares one quota of 50 certificates per week. Issuance becomes a coin
+flip and renewals can fail silently months later.
+
+Point `pg.<your-domain>` at the server's IPv4. If you use DuckDNS, note that it
+pre-fills the address of whatever machine loaded the page — that is your laptop,
+not your server. Check it:
+
+```bash
+dig +short pg.<your-domain>     # must be the server's address
+```
+
+### 14.2 Pick a port outside `PORT_RANGE`
+
+`PGPROXY_PORT` must not collide with the range the app hands out to databases
+(`PORT_RANGE_START`–`PORT_RANGE_END`, default 5432–5441). The default of `5433`
+is *inside* that range and will collide as soon as a database is allocated it.
+Use something clear of it — `5500` is fine.
+
+```
+PG_GATEWAY_HOST=pg.<your-domain>
+PGPROXY_PORT=5500
+```
+
+Set both in Coolify → the application → **Environment Variables**, with
+interpolation **off** and build-time **off** (nothing in the Docker build reads
+them, and build arguments persist in image metadata).
+
+### 14.3 Make the gateway reachable from Traefik
+
+This is the step most likely to go wrong, and the failure is not obvious.
+
+**Traefik runs in a container.** A port published to `127.0.0.1` is reachable
+only from the host's own loopback, so Traefik will never see it. The advice to
+bind the gateway to localhost is correct in spirit — it must not be on a public
+interface — but wrong in mechanism.
+
+Two options, in order of preference:
+
+**A network alias (best).** Coolify → the application → **Networking → Network
+aliases** → `provisioner`. Nothing is published on the host at all, and the name
+survives redeploys. Traefik then reaches it at `provisioner:5500`.
+
+**Or publish on the Docker bridge gateway.** Coolify → **Ports Mappings** →
+`<bridge-gateway>:5500:5500`. Find the address — it is the host's IP on the
+network Coolify's containers share:
+
+```bash
+docker network inspect coolify --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+```
+
+Typically `10.0.1.1`. This is reachable from containers and is not a public
+interface.
+
+**Do not trust `host.docker.internal` without checking.** It usually points at
+the default `docker0` bridge, which on a Coolify host is often `NO-CARRIER` and
+down — the name resolves, the dial fails, and Traefik logs
+`connection refused` against an address that looks plausible:
+
+```bash
+docker exec coolify-proxy getent hosts host.docker.internal
+ip -4 addr show docker0        # is it actually UP?
+```
+
+### 14.4 The Traefik route
+
+Write `/data/coolify/proxy/dynamic/pg.yaml` on the server. Coolify mounts
+`/data/coolify/proxy` at `/traefik` inside the proxy container and watches that
+directory, so the file is picked up within seconds — no restart.
+
+```yaml
+tcp:
+  routers:
+    pgp:
+      entryPoints: [https]
+      rule: "HostSNI(`pg.<your-domain>`)"
+      tls:
+        certResolver: letsencrypt
+        options: pg-alpn
+      service: pgp
+  services:
+    pgp:
+      loadBalancer:
+        servers:
+          - address: "provisioner:5500"     # or <bridge-gateway>:5500
+tls:
+  options:
+    pg-alpn:
+      alpnProtocols: ["postgresql"]
+```
+
+Confirm `entryPoints` and `certResolver` match your instance rather than
+assuming — Coolify passes them as flags:
+
+```bash
+docker inspect coolify-proxy --format '{{range .Args}}{{println .}}{{end}}' \
+  | grep -iE 'entrypoint|certresolver'
+```
+
+**`alpnProtocols` is load-bearing.** Direct negotiation offers `postgresql`, and
+Traefik's default TCP ALPN set does not include it. Omit this and the handshake
+completes and then hangs, with nothing in the logs you could search for.
+
+Redeploy. `[pg-gateway] listening on :5500 for pg.<domain>` means the listener
+is up.
+
+### 14.5 Verify, in this order
+
+**The route, before any client code:**
 
 ```bash
 openssl s_client -connect <server-ip>:443 -servername pg.<your-domain> \
-  -alpn postgresql </dev/null | head -20
+  -alpn postgresql </dev/null 2>/dev/null | grep -E 'ALPN|Verify return'
 ```
 
-You want a valid certificate chain and `ALPN protocol: postgresql`. Then:
+You want `ALPN protocol: postgresql` and `Verify return code: 0 (ok)`. If you
+get `TRAEFIK DEFAULT CERT`, no router matched the SNI — the file is missing,
+misnamed or malformed. If the backend is unreachable you will see
+`Error while dialing backend` in `docker logs coolify-proxy`, which names the
+address it tried; compare that against 14.3.
+
+**The whole path, without needing a password.** Send a startup packet naming a
+database that does not exist and check the gateway rejects it by name:
+
+```bash
+node -e '
+const tls=require("tls"), H="pg.<your-domain>";
+const b=Buffer.from("user\0postgres\0database\0nope\0\0","utf8");
+const p=Buffer.alloc(8+b.length);
+p.writeInt32BE(p.length,0); p.writeInt32BE(196608,4); b.copy(p,8);
+const s=tls.connect({host:H,port:443,servername:H,ALPNProtocols:["postgresql"]},
+  ()=>s.write(p));
+s.on("data",d=>{console.log(String.fromCharCode(d[0]),
+  d.toString("utf8",5).replace(/\0/g," ")); s.destroy();});'
+```
+
+`E ... No database named "nope" is managed by this gateway.` proves Traefik →
+ALPN → TLS termination → gateway → startup parsing all work. Naming a *real*
+database instead returns `R` and `SCRAM-SHA-256` — Postgres' own authentication
+challenge, which means the full path is live.
+
+**Then a real client:**
 
 ```bash
 psql "postgres://postgres:PW@pg.<your-domain>:443/demo_db?sslmode=verify-full&sslnegotiation=direct" \
   -c 'select version();'
 ```
 
-Things worth knowing:
+### Things worth knowing
 
 - **The gateway routes by the Postgres database name**, the one with
   underscores (`demo_db`), or by the database's Coolify uuid. The hyphenated
@@ -526,15 +629,16 @@ Things worth knowing:
 - **It reaches databases over the Docker network**, so it works for `internal`
   databases too — and those are now the better default for off-box clients.
 - **It does not need Coolify's SSL flag.** The unencrypted hop is container to
-  container on one host. The step-10 SSL pause still matters for the *public*
-  route, and only for that.
+  container on one host. This rescues databases created through the API with SSL
+  off, which cannot otherwise be fixed without recreating them. The step-10 SSL
+  pause still matters for the *public* route, and only for that.
 - **`CancelRequest` is not forwarded.** Cancellation carries a pid and a secret
   key, not a database name, so there is nothing to route it by; a cancelled
   query runs to completion. Nothing else in the protocol is interpreted — after
   the startup packet the socket is piped byte for byte.
-- **Driver support is the real constraint.** `pg` (node-postgres) and `psql` 17+
-  do direct negotiation; a number of other drivers do not yet. Check before you
-  migrate anything.
+- **Driver support is the real constraint.** `pg` (node-postgres, 8.14+) and
+  `psql` 17+ do direct negotiation; a number of other drivers do not yet. Check
+  before you migrate anything.
 
 ---
 

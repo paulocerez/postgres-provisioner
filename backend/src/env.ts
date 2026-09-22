@@ -65,7 +65,12 @@ const envSchema = z
      * blank leaves the listener unstarted and the connection string hidden.
      */
     PG_GATEWAY_HOST: blankAsUnset(z.string().min(1)),
-    PGPROXY_PORT: blankAsDefault(z.coerce.number().int().min(1).max(65535).default(5433)),
+    /**
+     * Deliberately outside the default PORT_RANGE (5432-5441). The gateway and
+     * the databases are both published on the host, so a default that sat
+     * inside the range would collide the moment `allocatePort` handed it out.
+     */
+    PGPROXY_PORT: blankAsDefault(z.coerce.number().int().min(1).max(65535).default(5500)),
 
     /**
      * A Vercel API token, and the team those projects live under. Setting the
@@ -99,6 +104,11 @@ const envSchema = z
   .refine((v) => v.PORT_RANGE_START <= v.PORT_RANGE_END, {
     message: 'PORT_RANGE_START must be less than or equal to PORT_RANGE_END',
     path: ['PORT_RANGE_START'],
+  })
+  .refine((v) => v.PGPROXY_PORT < v.PORT_RANGE_START || v.PGPROXY_PORT > v.PORT_RANGE_END, {
+    message:
+      'PGPROXY_PORT must be outside PORT_RANGE. Both are published on the host, so a gateway port inside the range collides as soon as a database is allocated it.',
+    path: ['PGPROXY_PORT'],
   })
   .refine((v) => Boolean(v.HCLOUD_TOKEN) === Boolean(v.HCLOUD_FIREWALL_ID), {
     message:

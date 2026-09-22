@@ -24,6 +24,12 @@ Three documents, by audience: **[USAGE.md](USAGE.md)** if you have a project tha
 needs a database, **[SETUP.md](SETUP.md)** if you are hosting this app on your own
 Coolify instance, and the rest of this file if you are changing its code.
 
+Self-hosting it is a 15-step walkthrough in SETUP.md, written in the order the
+steps actually have to happen and with the reasoning for each. The two optional
+steps at the end — the TLS gateway (14) and Vercel project wiring (15) — are
+what turn it from a database creator into something a project off this server
+can actually use.
+
 ## Stack
 
 npm workspaces: `shared/` (zod schemas used by both sides), `backend/`
@@ -258,10 +264,24 @@ than inadequate. And this path does not depend on Coolify's SSL flag at all,
 because the unencrypted hop is container-to-container on one host; the SSL
 checkpoint still matters, but only for the public route.
 
-The listener binds `0.0.0.0` *inside the container*. What keeps it off the
-internet is the port mapping — `127.0.0.1:5433:5433`. Published without that
-prefix it is a plaintext Postgres proxy on the public internet, which is worse
-than what it replaces. SETUP.md step 14 says so twice.
+The listener binds `0.0.0.0` *inside the container*, which is normal there. What
+keeps it off the internet is how it is exposed, and this is the part that is
+easy to get wrong: **Traefik runs in a container, so a port published to
+`127.0.0.1` is unreachable to it.** Use a Docker network alias, or publish on
+the `coolify` bridge gateway — never loopback, never `0.0.0.0`.
+
+Two more things that cost real debugging time, both written up in SETUP.md
+step 14:
+
+- **`host.docker.internal` is not trustworthy here.** On a Coolify host it
+  commonly resolves to the default `docker0` bridge, which is often down. The
+  name resolves, the dial fails, and Traefik logs `connection refused` against
+  an address that looks entirely plausible.
+- **`PGPROXY_PORT` must sit outside `PORT_RANGE`.** Both the gateway and the
+  databases are published on the host, so a gateway port inside the range
+  collides the moment `allocatePort` hands it out. `env.ts` refuses to boot on
+  that overlap rather than letting it surface as a port-binding failure weeks
+  later.
 
 ## Connected projects
 

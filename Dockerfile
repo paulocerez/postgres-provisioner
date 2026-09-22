@@ -45,9 +45,9 @@ RUN mkdir -p /data && chown -R node:node /data /app
 
 USER node
 EXPOSE 3000
-# The Postgres TLS gateway, when PG_GATEWAY_HOST is set. Publish it bound to
-# localhost only — Traefik is the only thing that should reach it.
-EXPOSE 5433
+# The Postgres TLS gateway, when PG_GATEWAY_HOST is set. Reach it over the
+# Docker network; it must not be published on a public interface.
+EXPOSE 5500
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
