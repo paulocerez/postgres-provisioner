@@ -5,12 +5,16 @@ You have an application that needs Postgres. This is how you give it one.
 For hosting this app, see [SETUP.md](SETUP.md); for how it works internally, see
 [README.md](README.md). You need neither to follow this.
 
-One thing to get out of the way first: **this app does not wire anything to
-anything.** The "Project / owner" fields on the create form are a label stored in
-its own SQLite so you can tell later which database belongs to what — they never
-reach Coolify, and they do not configure your application. Connecting means
-copying a connection string into your app's configuration, and — if you take the
-public route — allowing its IP through the firewall.
+The expected shape of things: several projects — frontends and backends on
+Vercel, Render or similar — each holding a connection string to a database on
+this box. This document is how you get one of those strings and make it work
+from where your code actually runs.
+
+Today that last step is yours to take: you copy the string into whatever holds
+your project's secrets, and — if you take the public route — allow its IP through
+the firewall. The "Project / owner" fields on the create form record which
+project a database belongs to; they are stored in this app's own SQLite and do
+not reach Coolify or configure anything on their own.
 
 ---
 
@@ -70,7 +74,7 @@ not on the detail page, no gateway is configured here; see
   Postgres database inside it is `demo_db` (hyphens are not legal in a database
   name). The role is always `postgres`.
 - **Version**, **Access** (step 1), **Backups**.
-- **Notes** — project and owner. Worth filling in: in six months this is the only
+- **Notes** — project and owner. Worth filling in: for now this is the only
   record of which application uses this database.
 
 The job then **pauses before starting** and asks you to enable SSL in Coolify.
@@ -202,8 +206,9 @@ SSL error means `sslmode` disagrees with step 2.
   create time and has no way to learn a new one.
 - **Deleting a database frees its port for the next one**, and clears its
   allowlist rule with it. Nothing from the old database's access survives.
-- **Keep the Notes field honest.** It is the only link between a database and the
-  project that depends on it.
+- **Keep the Project / owner fields honest.** They are currently the only record
+  of which project depends on which database, and in six months that is the
+  question you will be asking.
 
 ---
 
