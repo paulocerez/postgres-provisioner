@@ -439,6 +439,96 @@ A few properties worth knowing:
 
 ---
 
+## 14. The TLS gateway (optional)
+
+Step 13 gives you an allowlist. This step is for the case an allowlist cannot
+cover: a client whose address you cannot enumerate — Vercel, Lambda, most CI.
+
+The idea is to stop deciding access by *where the client connects from* and
+start authenticating *the server* instead. Traefik already terminates TLS on 443
+for this app; a TCP router can share that port, match on SNI, and hand the
+connection to a small gateway this app runs. PostgreSQL 17+ clients can ask for
+TLS directly (`sslnegotiation=direct`), which makes them offer the `postgresql`
+ALPN protocol — that is what the route matches.
+
+What you get: `sslmode=verify-full` against a real Let's Encrypt certificate,
+**no Postgres port opened at all**, and databases that can stay `internal`.
+
+1. DNS: `A pg.<your-domain> → <your server IP>`. It can be the same IP as the
+   app's domain; the two are told apart by SNI.
+2. Set `PG_GATEWAY_HOST=pg.<your-domain>` in the application's environment.
+   Leave `PGPROXY_PORT` at `5433` unless it collides with your `PORT_RANGE`.
+3. Coolify → the application → **Ports Mappings** → `127.0.0.1:5433:5433`.
+   **The `127.0.0.1:` prefix is the whole point.** Mapped as `5433:5433` the
+   gateway is on the public internet with no TLS in front of it, which is
+   strictly worse than the thing you are replacing.
+4. Write `/data/coolify/proxy/dynamic/pg.yaml` on the server:
+
+   ```yaml
+   tcp:
+     routers:
+       pgp:
+         entryPoints: [https]
+         rule: "HostSNI(`pg.<your-domain>`)"
+         tls:
+           certResolver: letsencrypt
+           options: pg-alpn
+         service: pgp
+     services:
+       pgp:
+         loadBalancer:
+           servers:
+             - address: "host.docker.internal:5433"
+   tls:
+     options:
+       pg-alpn:
+         alpnProtocols: ["postgresql"]
+   ```
+
+   Two things here are load-bearing. **`alpnProtocols`** must include
+   `postgresql`; Traefik's default TCP set does not, and without it the
+   handshake completes and then hangs rather than failing with anything you
+   could search for. And **`host.docker.internal`** must actually resolve inside
+   the proxy container — check with
+   `docker exec coolify-proxy getent hosts host.docker.internal` before you rely
+   on it, and use a network alias if it does not.
+5. Redeploy. The log line `[pg-gateway] listening on :5433 for pg.<domain>`
+   means the listener is up.
+
+Verify the route before touching any client code:
+
+```bash
+openssl s_client -connect <server-ip>:443 -servername pg.<your-domain> \
+  -alpn postgresql </dev/null | head -20
+```
+
+You want a valid certificate chain and `ALPN protocol: postgresql`. Then:
+
+```bash
+psql "postgres://postgres:PW@pg.<your-domain>:443/demo_db?sslmode=verify-full&sslnegotiation=direct" \
+  -c 'select version();'
+```
+
+Things worth knowing:
+
+- **The gateway routes by the Postgres database name**, the one with
+  underscores (`demo_db`), or by the database's Coolify uuid. The hyphenated
+  resource name is not accepted.
+- **It reaches databases over the Docker network**, so it works for `internal`
+  databases too — and those are now the better default for off-box clients.
+- **It does not need Coolify's SSL flag.** The unencrypted hop is container to
+  container on one host. The step-10 SSL pause still matters for the *public*
+  route, and only for that.
+- **`CancelRequest` is not forwarded.** Cancellation carries a pid and a secret
+  key, not a database name, so there is nothing to route it by; a cancelled
+  query runs to completion. Nothing else in the protocol is interpreted — after
+  the startup packet the socket is piped byte for byte.
+- **Driver support is the real constraint.** `pg` (node-postgres) and `psql` 17+
+  do direct negotiation; a number of other drivers do not yet. Check before you
+  migrate anything.
+
+---
+
 ## Troubleshooting
 
 Every one of these was hit during the first real deployment.

@@ -9,8 +9,8 @@ One thing to get out of the way first: **this app does not wire anything to
 anything.** The "Project / owner" fields on the create form are a label stored in
 its own SQLite so you can tell later which database belongs to what — they never
 reach Coolify, and they do not configure your application. Connecting means
-copying a connection string into your app's configuration, and, if the app lives
-off this server, allowing its IP through the firewall.
+copying a connection string into your app's configuration, and — if you take the
+public route — allowing its IP through the firewall.
 
 ---
 
@@ -18,27 +18,47 @@ off this server, allowing its IP through the firewall.
 
 This is the only decision that is hard to change later, so make it first.
 
-| | **Internal** | **Public** |
-|---|---|---|
-| Use when | your app runs on this same server, as a Coolify resource | your app runs anywhere else |
-| Host | the database's container uuid, port `5432` | `PUBLIC_HOST`, a port from `PORT_RANGE` |
-| Traffic | stays on the Coolify Docker network | crosses the public internet |
-| Firewall | not involved | must allow your app's address |
-| Encryption | unnecessary — nothing leaves the host | **you want SSL**, see step 2 |
+| | **Internal** | **Over TLS** | **Public** |
+|---|---|---|---|
+| Use when | your app runs on this same server, as a Coolify resource | your app runs anywhere, especially on rotating addresses | your app has a fixed address and an old driver |
+| Host | the database's container uuid, port `5432` | `PG_GATEWAY_HOST`, port `443` | `PUBLIC_HOST`, a port from `PORT_RANGE` |
+| Traffic | stays on the Coolify Docker network | crosses the public internet | crosses the public internet |
+| Firewall | not involved | not involved — no port is opened | must allow your app's address |
+| Encryption | unnecessary — nothing leaves the host | `verify-full`, against a real certificate | `require` at best, see step 2 |
+| Needs | nothing | PostgreSQL 17+ and a driver that does `sslnegotiation=direct` | a fixed egress address |
 
 Prefer internal whenever it is possible. It needs no firewall rule, no TLS, and
 no address that changes.
 
-You choose this on the create form as **Access: internal / public**. The app
-deliberately has no toggle afterwards: Coolify binds the host port only when the
-data directory is first created, so switching later is a Coolify operation, not a
-one-click change here. Pick correctly now.
+You choose internal or public on the create form as **Access: internal /
+public**. The app deliberately has no toggle afterwards: Coolify binds the host
+port only when the data directory is first created, so switching later is a
+Coolify operation, not a one-click change here. Pick correctly now.
+
+**The TLS route is not one of those choices** — it is not a property of the
+database at all. If this deployment has a gateway configured, every database gets
+that connection string, internal ones included, because the gateway reaches them
+over the Docker network rather than through a published port. If the string is
+not on the detail page, no gateway is configured here; see
+[SETUP.md](SETUP.md) step 14.
 
 > **Serverless platforms** (Vercel, Lambda, most CI) connect from rotating
-> addresses you cannot enumerate, so the public route fits them badly — you would
-> have to allow a wide range, which is barely a restriction. Either run the app on
-> this server, or put a connection proxy in front. This app will not pretend
-> otherwise.
+> addresses you cannot enumerate. An IP allowlist cannot express that, and
+> widening one until it does means `0.0.0.0/0`, which is not a restriction — the
+> app asks you to confirm that in as many words, and refuses it outright on a
+> database without SSL.
+>
+> **Use the TLS route instead.** It authenticates the server with a real
+> certificate rather than trusting where the client connects from, so it needs no
+> allowlist entry at all. Its one requirement is the driver: `pg` (node-postgres)
+> supports `sslnegotiation=direct`; several others do not yet. Check yours before
+> you commit to it.
+>
+> The alternative, if your driver cannot: Vercel's Static IPs (Pro and
+> Enterprise, billed per project) give you a fixed egress pair to allow. Be aware
+> that the pair is a NAT gateway shared with other customers in that region, so
+> allowing it narrows the internet to one gateway — it is not an authentication
+> boundary.
 
 ---
 
@@ -67,12 +87,17 @@ recreating the database**. For an internal-only database it matters much less.
 
 ## 3. Copy the connection string
 
-The detail page shows both forms, masked. Take the one you chose in step 1:
+The detail page shows each available form, masked. Take the one you chose in
+step 1:
 
 ```
-postgres://postgres:••••••••@2.28.117.37:5433/demo_db?sslmode=require   ← Public
-postgres://postgres:••••••••@kso8w0k...:5432/demo_db                    ← Internal
+postgres://…@2.28.117.37:5433/demo_db?sslmode=require                    ← Public
+postgres://…@kso8w0k...:5432/demo_db                                     ← Internal
+postgres://…@pg.example.com:443/demo_db?sslmode=verify-full&sslnegotiation=direct
+                                                                         ← Over TLS
 ```
+
+The third appears only when this deployment has a gateway configured.
 
 The **`.env`** button next to it copies a ready line:
 
@@ -86,6 +111,11 @@ actually is, not as it should be — `sslmode=disable` means SSL was never enabl
 server without SSL simply fails to connect. On a public database, `disable` means
 the password you just copied will cross the internet in clear text.
 
+The TLS string is the exception: its `verify-full` describes the gateway's
+certificate, not the container's, so it reads the same whether or not step 2 was
+done. Nothing is being glossed over — on that route the unencrypted hop never
+leaves the host.
+
 Two smaller things:
 
 - Copying needs a secure context. On a plain-`http://` deployment of this app the
@@ -98,7 +128,8 @@ Two smaller things:
 
 ## 4. Allow your application through the firewall
 
-Public databases only; skip this for internal ones.
+**Public databases only** — skip this entirely for internal ones, and for the TLS
+route, which opens no port and so has nothing to allow.
 
 On the detail page, **Allowed sources** → add the address your application
 connects *from*, in CIDR form, with a label saying which project it is. A single
@@ -140,8 +171,13 @@ If the card is not there at all, this deployment has no `HCLOUD_TOKEN` /
 resolves over the Coolify Docker network, so no firewall rule and no TLS are
 needed. Redeploy.
 
-**An app anywhere else:** paste the **public** line into whatever holds your
-secrets, and make sure step 4 includes that host's address.
+**An app anywhere else:** paste the **Over TLS** line into whatever holds your
+secrets — there is no step 4 for it. If you are using the **public** line
+instead, make sure step 4 includes that host's address.
+
+**On Vercel:** use the TLS line, and confirm your `pg` version supports
+`sslnegotiation=direct` first. Set `max: 1` on the pool — each concurrent
+invocation opens its own connection, and Postgres defaults to 100 of them.
 
 Then prove it from the application's own environment, not from your laptop —
 "works on my machine" is exactly the failure mode the firewall introduces:
@@ -181,3 +217,6 @@ SSL error means `sslmode` disagrees with step 2.
 | `no pg_hba.conf entry … no encryption` | The opposite: the server wants SSL and your client asked for none. Use the string as given. |
 | Authentication failed | The password was changed outside this app, or the database was not created by it. |
 | Works from your laptop, not from the app | You allowed your own IP, not the application's egress address. |
+| TLS string hangs, or resets after the handshake | The gateway's SNI route is not matching. Check it with `openssl s_client -connect <host>:443 -servername <host> -alpn postgresql`. |
+| `unsupported startup parameter` or a driver error on `sslnegotiation` | Your driver does not do direct TLS negotiation. Use the public route, or change driver. |
+| `No database named "…" is managed by this gateway` | The gateway routes by the *Postgres* database name (`demo_db`), not the Coolify resource name (`demo-db`). |

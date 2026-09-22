@@ -8,6 +8,7 @@ import { runMigrations } from './db/client.js';
 import { env, isProduction, servedOverHttps } from './env.js';
 import { pruneOldJobs, resumeRunningJobs } from './jobs.js';
 import { csrfGuard, errorHandler, noStore } from './middleware.js';
+import { startPgGateway } from './pgproxy.js';
 import { auditRouter } from './routes/audit.js';
 import { authRouter } from './routes/auth.js';
 import { databasesRouter } from './routes/databases.js';
@@ -110,6 +111,11 @@ async function main(): Promise<void> {
   await resumeRunningJobs().catch((err: unknown) => {
     console.error('[jobs] could not resume in-flight jobs:', err);
   });
+
+  // Started after the Coolify check and job recovery, like the HTTP listener:
+  // neither of those failing should stop databases being reachable. Does
+  // nothing unless PG_GATEWAY_HOST is set.
+  startPgGateway();
 
   app.listen(env.PORT, () => {
     console.log(`[server] listening on :${env.PORT} (${env.NODE_ENV})`);

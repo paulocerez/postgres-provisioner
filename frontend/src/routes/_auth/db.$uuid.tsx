@@ -192,6 +192,19 @@ function DatabaseDetailPage() {
             value={data.internalUrl}
             hint={data.internalUrl ? 'For other containers on the Coolify network.' : undefined}
           />
+          {/*
+            Only rendered when a gateway is configured. It is the one string
+            that works from an address you cannot enumerate — serverless egress,
+            CI — because it is authenticated by a real certificate rather than
+            by where the client happens to be connecting from.
+          */}
+          {data.gatewayUrl && (
+            <ConnectionString
+              label="Over TLS (works from anywhere)"
+              value={data.gatewayUrl}
+              hint="No firewall rule needed. Requires PostgreSQL 17+ and a client that supports sslnegotiation=direct — node-postgres does; many other drivers do not yet."
+            />
+          )}
         </div>
       </section>
 

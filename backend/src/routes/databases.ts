@@ -14,6 +14,7 @@ import { eq } from 'drizzle-orm';
 import { Router } from 'express';
 import { writeAudit } from '../audit.js';
 import {
+  buildGatewayConnectionUrl,
   buildInternalConnectionUrl,
   buildPublicConnectionUrl,
   coolifyDatabaseUrl,
@@ -128,6 +129,7 @@ databasesRouter.get(
       ),
       internalUrl: buildInternalConnectionUrl(raw, password),
       publicUrl: buildPublicConnectionUrl(raw, password),
+      gatewayUrl: buildGatewayConnectionUrl(raw, password),
       postgresUser: raw.postgres_user ?? null,
       postgresDb: raw.postgres_db ?? null,
       postgresPassword: password,

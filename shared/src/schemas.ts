@@ -279,6 +279,8 @@ export type AllowlistPutInput = { entries: AllowlistEntry[] };
 export const databaseDetailSchema = databaseSchema.extend({
   internalUrl: z.string().nullable(),
   publicUrl: z.string().nullable(),
+  /** Through the TLS gateway, when one is configured. See `pgGateway` on meta. */
+  gatewayUrl: z.string().nullable(),
   postgresUser: z.string().nullable(),
   postgresDb: z.string().nullable(),
   postgresPassword: z.string().nullable(),

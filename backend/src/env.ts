@@ -45,6 +45,14 @@ const envSchema = z
         .positive('the numeric id of the firewall, from its URL in the Hetzner console'),
     ),
 
+    /**
+     * The SNI hostname Traefik routes to the Postgres gateway, and the port the
+     * gateway listens on. Setting the host turns the gateway on; leaving it
+     * blank leaves the listener unstarted and the connection string hidden.
+     */
+    PG_GATEWAY_HOST: blankAsUnset(z.string().min(1)),
+    PGPROXY_PORT: z.coerce.number().int().min(1).max(65535).default(5433),
+
     ADMIN_EMAIL: z.string().email('must be a valid email address'),
     /**
      * Checked for shape, not just presence. A bcrypt hash is full of `$`, and
@@ -102,6 +110,13 @@ export const isProduction = env.NODE_ENV === 'production';
  * says so, and no outbound call is made when it is false.
  */
 export const firewallManaged = Boolean(env.HCLOUD_TOKEN && env.HCLOUD_FIREWALL_ID);
+
+/**
+ * Whether databases are reachable through the TLS gateway on 443 as well as (or
+ * instead of) a published host port. Off unless `PG_GATEWAY_HOST` is set, so an
+ * existing deployment gains nothing it did not ask for.
+ */
+export const pgGatewayEnabled = Boolean(env.PG_GATEWAY_HOST);
 
 /**
  * Whether the app is actually reachable over TLS, which is a different question

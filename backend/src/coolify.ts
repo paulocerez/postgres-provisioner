@@ -5,7 +5,7 @@ import {
   coolifyDatabasePath,
 } from '@app/shared';
 import { redactString } from './audit.js';
-import { env } from './env.js';
+import { env, pgGatewayEnabled } from './env.js';
 
 /**
  * The only place that talks to Coolify. The React client never sees
@@ -546,6 +546,29 @@ export function buildInternalConnectionUrl(
   const user = raw.postgres_user ?? 'postgres';
   const database = raw.postgres_db ?? postgresDbName(raw.name);
   return `postgres://${user}:${password}@${raw.uuid}:5432/${database}`;
+}
+
+/**
+ * Reachable from anywhere, through the TLS gateway Traefik fronts on 443.
+ *
+ * Unlike the public URL this does not need `is_public` or a host port: the
+ * gateway routes by database name over the Docker network, so an `internal`
+ * database is reachable this way too. And unlike both of the others it can
+ * offer `verify-full`, because the certificate is Traefik's real one rather
+ * than the self-signed certificate Coolify gives the container.
+ *
+ * `sslnegotiation=direct` is required, not cosmetic: it is what makes the
+ * client offer the `postgresql` ALPN protocol that the SNI route matches on.
+ * It needs PostgreSQL 17+ on both ends and a client library that implements it.
+ */
+export function buildGatewayConnectionUrl(
+  raw: RawDatabase,
+  password: string | null,
+): string | null {
+  if (!pgGatewayEnabled || !password) return null;
+  const user = raw.postgres_user ?? 'postgres';
+  const database = raw.postgres_db ?? postgresDbName(raw.name);
+  return `postgres://${user}:${password}@${env.PG_GATEWAY_HOST}:443/${database}?sslmode=verify-full&sslnegotiation=direct`;
 }
 
 export { mapStatus, versionFromImage, isPostgres, postgresDbName };

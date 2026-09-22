@@ -16,6 +16,8 @@ What it does that clicking through Coolify does not:
   the last moment enabling it still takes effect,
 - schedules the daily S3 backup,
 - optionally manages who may reach each database, as real Hetzner firewall rules,
+- optionally fronts them all with one TLS endpoint, for clients whose address an
+  allowlist cannot express,
 - and hands you a working `psql` connection string at the end.
 
 Three documents, by audience: **[USAGE.md](USAGE.md)** if you have a project that
@@ -208,6 +210,58 @@ compare-and-swap, so every write is a read-modify-write. Hence:
 
 The desired port for each rule comes from Coolify, not from SQLite, so applying
 an allowlist needs Coolify reachable as well.
+
+## The TLS gateway
+
+Optional, and off unless `PG_GATEWAY_HOST` is set. `backend/src/pgproxy.ts` is a
+Postgres-protocol listener that Traefik routes to by SNI on 443, alongside the
+HTTP routers already there.
+
+It exists because of a gap the allowlist cannot close. Serverless platforms
+connect from rotating addresses, so the only allowlist that admits them is
+`0.0.0.0/0` — which is not an allowlist. The gateway changes what is being
+checked: instead of trusting the client's address, it authenticates the *server*
+with a real certificate, which is a property the client can verify from
+anywhere.
+
+The mechanism is PostgreSQL 17+ direct TLS negotiation. A client with
+`sslnegotiation=direct` opens with a TLS ClientHello offering the `postgresql`
+ALPN protocol, so Traefik can match it on SNI and terminate TLS with its
+Let's Encrypt certificate. What arrives here is a plain Postgres stream.
+
+The listener reads exactly one thing — the startup packet — and then gets out of
+the way:
+
+- `readStartupPacket` is pure and total, because it is the only code in this
+  repo that parses bytes off the public internet. It caps the packet at
+  Postgres' own `MAX_STARTUP_PACKET_LENGTH`, and every prefix of a valid packet
+  parses as `incomplete` rather than as an error, since a TCP read can split
+  anywhere.
+- An `SSLRequest` is answered `N` rather than refused — that is what a client
+  using the *default* negotiation sends once inside the tunnel, and declining it
+  is safe because the cleartext hop never leaves the host. A packet pipelined
+  behind it is re-parsed from the same buffer, not left waiting for another read.
+- The `database` parameter is resolved to a Coolify uuid through
+  `database_meta`, by uuid or by `postgresDbName(name)` — the same transform
+  used at create time, so the two cannot drift.
+- Failures send a real `ErrorResponse` with SQLSTATE `3D000`, so `psql` prints a
+  reason instead of the connection simply vanishing.
+- `CancelRequest` carries a pid and a key but no database name, so there is
+  nothing to route it by; it is dropped rather than guessed at.
+
+After that the socket is piped both ways, byte for byte, with the buffered
+startup packet replayed first. Nothing else in the protocol is interpreted.
+
+Two consequences worth stating. Databases reached this way can be `internal` —
+no host port, no firewall rule — which makes the allowlist irrelevant rather
+than inadequate. And this path does not depend on Coolify's SSL flag at all,
+because the unencrypted hop is container-to-container on one host; the SSL
+checkpoint still matters, but only for the public route.
+
+The listener binds `0.0.0.0` *inside the container*. What keeps it off the
+internet is the port mapping — `127.0.0.1:5433:5433`. Published without that
+prefix it is a plaintext Postgres proxy on the public internet, which is worse
+than what it replaces. SETUP.md step 14 says so twice.
 
 ## Security
 
