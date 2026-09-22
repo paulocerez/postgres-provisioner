@@ -15,22 +15,36 @@ function blankAsUnset<T extends z.ZodTypeAny>(schema: T) {
   return z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
 }
 
+/**
+ * The same reasoning for a variable that has a default: blank must mean "use
+ * the default", not "the empty string".
+ *
+ * Without this, `PGPROXY_PORT=` refuses to boot — `z.coerce.number()` turns ''
+ * into 0, which fails `.min(1)`, and `.default()` never runs because the value
+ * was present. The operator sees "Number must be greater than or equal to 1"
+ * about a variable they deliberately left blank, which is the least helpful
+ * possible description of the problem.
+ */
+function blankAsDefault<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((v) => (v === '' ? undefined : v), schema);
+}
+
 const envSchema = z
   .object({
-    NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    PORT: z.coerce.number().int().positive().default(3000),
+    NODE_ENV: blankAsDefault(z.enum(['development', 'production', 'test']).default('development')),
+    PORT: blankAsDefault(z.coerce.number().int().positive().default(3000)),
 
     COOLIFY_URL: z.string().url('must be a full URL, e.g. http://1.2.3.4:8000'),
     COOLIFY_TOKEN: z.string().min(1, 'required: Coolify → Keys & Tokens → API tokens'),
     COOLIFY_SERVER_UUID: z.string().optional(),
     COOLIFY_PROJECT_UUID: z.string().optional(),
-    COOLIFY_ENVIRONMENT: z.string().default('production'),
+    COOLIFY_ENVIRONMENT: blankAsDefault(z.string().min(1).default('production')),
     COOLIFY_S3_STORAGE_UUID: z.string().optional(),
 
     PUBLIC_HOST: z.string().min(1, 'host used in public connection strings'),
-    PORT_RANGE_START: z.coerce.number().int().min(1).max(65535).default(5432),
-    PORT_RANGE_END: z.coerce.number().int().min(1).max(65535).default(5441),
-    DEFAULT_PG_IMAGE: z.string().default('postgres:18-alpine'),
+    PORT_RANGE_START: blankAsDefault(z.coerce.number().int().min(1).max(65535).default(5432)),
+    PORT_RANGE_END: blankAsDefault(z.coerce.number().int().min(1).max(65535).default(5441)),
+    DEFAULT_PG_IMAGE: blankAsDefault(z.string().min(1).default('postgres:18-alpine')),
 
     /**
      * Both optional, and only useful together: without them the per-database
@@ -51,7 +65,7 @@ const envSchema = z
      * blank leaves the listener unstarted and the connection string hidden.
      */
     PG_GATEWAY_HOST: blankAsUnset(z.string().min(1)),
-    PGPROXY_PORT: z.coerce.number().int().min(1).max(65535).default(5433),
+    PGPROXY_PORT: blankAsDefault(z.coerce.number().int().min(1).max(65535).default(5433)),
 
     /**
      * A Vercel API token, and the team those projects live under. Setting the
@@ -80,7 +94,7 @@ const envSchema = z
     SESSION_SECRET: z.string().min(32, 'must be at least 32 characters'),
 
     APP_ORIGIN: z.string().url('full origin of the deployed app, used for the CSRF check'),
-    DATA_DIR: z.string().default('/data'),
+    DATA_DIR: blankAsDefault(z.string().min(1).default('/data')),
   })
   .refine((v) => v.PORT_RANGE_START <= v.PORT_RANGE_END, {
     message: 'PORT_RANGE_START must be less than or equal to PORT_RANGE_END',

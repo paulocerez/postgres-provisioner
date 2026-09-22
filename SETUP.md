@@ -235,6 +235,15 @@ Then set these in Coolify → Environment Variables:
 | `PORT` | `3000` | |
 | `DATA_DIR` | `/data` | Must match the volume mount |
 
+### Variables you leave blank
+
+Every variable with a default may be left empty, and Coolify's editor writes an
+empty string for one you create and never fill in. That is treated as "use the
+default" rather than as the empty string, so adding `PGPROXY_PORT` to the list
+and leaving it blank is safe. Only the variables with no default — the Coolify
+URL and token, `PUBLIC_HOST`, the admin credentials and `APP_ORIGIN` — actually
+have to be filled in.
+
 ### The `$` trap
 
 A bcrypt hash looks like `$2a$12$iaD3…`. **Coolify interpolates `$VARIABLES` in
