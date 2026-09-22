@@ -26,7 +26,7 @@ test('accepts a single IPv4 address', () => {
 
 test('accepts a network and normalises whitespace and case', () => {
   assert.equal(value('  203.0.113.0/24  '), '203.0.113.0/24');
-  assert.equal(value('2001:DB8::/32'), '2001:db8:0:0:0:0:0:0/32');
+  assert.equal(value('2001:DB8::/32'), '2001:db8::/32');
 });
 
 test('rejects a range with host bits set, naming both fixes', () => {
@@ -51,7 +51,36 @@ test('rejects leading zeros rather than guessing the base', () => {
 });
 
 test('handles IPv6 host bits and "::" placement', () => {
-  assert.equal(value('2001:db8:1::/48'), '2001:db8:1:0:0:0:0:0/48');
+  assert.equal(value('2001:db8:1::/48'), '2001:db8:1::/48');
   assert.match(message('2001:db8::1/64'), /Host bits/);
   assert.match(message('2001::db8::1/128'), /at most once/);
+});
+
+/**
+ * IPv6 sources must come out in Hetzner's own spelling. The firewall reconciler
+ * compares the rules it wants against the rules Hetzner reports as strings, so
+ * an expanded `2001:db8:0:0:0:0:0:0/32` here would never equal the compressed
+ * form that comes back — and every reconcile would rewrite the firewall again.
+ */
+test('normalises IPv6 to RFC 5952 compressed form', () => {
+  assert.equal(value('2001:0db8:0000:0000:0000:0000:0000:0001/128'), '2001:db8::1/128');
+  assert.equal(value('::/0'), '::/0');
+  assert.equal(value('2a01:4f8:c17:1::1/128'), '2a01:4f8:c17:1::1/128');
+});
+
+test('collapses only the longest zero run, leftmost on a tie', () => {
+  // Two runs, lengths 1 and 3 — the longer one collapses.
+  assert.equal(value('1:0:0:2:0:0:0:3/128'), '1:0:0:2::3/128');
+  // Two runs of equal length — the leftmost collapses.
+  assert.equal(value('2001:db8:0:0:1:0:0:1/128'), '2001:db8::1:0:0:1/128');
+});
+
+test('never collapses a single zero group', () => {
+  // `2001:db8:0:1:1:1:1:1` has one zero group; `::` would be no shorter and
+  // Hetzner does not spell it that way.
+  assert.equal(value('2001:db8:0:1:1:1:1:1/128'), '2001:db8:0:1:1:1:1:1/128');
+});
+
+test('suggests the corrected network in compressed form', () => {
+  assert.match(message('2001:db8::1/64'), /2001:db8::\/64/);
 });

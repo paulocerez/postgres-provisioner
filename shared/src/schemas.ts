@@ -172,14 +172,53 @@ function parseIpv6Cidr(address: string, prefix: number): CidrParse {
     return word & mask;
   });
   if (network.some((word, i) => word !== words[i])) {
-    const suggestion = network.map((word) => word.toString(16)).join(':');
+    const suggestion = compressIpv6(network);
     return {
       ok: false,
       message: `Host bits must be zero for a /${prefix}. Did you mean ${suggestion}/${prefix}, or ${address}/128 for just this address?`,
     };
   }
 
-  return { ok: true, value: `${words.map((word) => word.toString(16)).join(':')}/${prefix}` };
+  return { ok: true, value: `${compressIpv6(words)}/${prefix}` };
+}
+
+/**
+ * RFC 5952 canonical form: lowercase, no leading zeros, and the longest run of
+ * zero groups collapsed to `::` (leftmost wins a tie, and a single zero group is
+ * never collapsed).
+ *
+ * This has to match Hetzner byte for byte. `canonical()` in the backend's
+ * firewall reconciler compares the rules it wants against the rules Hetzner
+ * reports as plain strings, and Hetzner reports the compressed form. Emitting
+ * the expanded one here would make that comparison never hold, so every
+ * reconcile would rewrite the firewall forever.
+ */
+function compressIpv6(words: number[]): string {
+  let bestStart = -1;
+  let bestLength = 0;
+  let start = -1;
+  for (let i = 0; i <= words.length; i += 1) {
+    if (i < words.length && words[i] === 0) {
+      if (start === -1) start = i;
+      continue;
+    }
+    if (start !== -1) {
+      const length = i - start;
+      // Strictly greater keeps the leftmost run when two are the same length.
+      if (length > bestLength) {
+        bestStart = start;
+        bestLength = length;
+      }
+      start = -1;
+    }
+  }
+
+  const groups = words.map((word) => word.toString(16));
+  if (bestLength < 2) return groups.join(':');
+
+  const head = groups.slice(0, bestStart).join(':');
+  const tail = groups.slice(bestStart + bestLength).join(':');
+  return `${head}::${tail}`;
 }
 
 /** Normalised on both sides, so the stored value is the one Hetzner is sent. */
