@@ -221,6 +221,18 @@ function compressIpv6(words: number[]): string {
   return `${head}::${tail}`;
 }
 
+/**
+ * Whether a source allows the entire internet. `parseCidr` accepts `/0` — it is
+ * a legal range and Hetzner takes it — so nothing upstream of this will stop an
+ * operator typing it. The UI and the API use this to make that a deliberate act
+ * rather than a typo.
+ */
+export function isOpenToWorld(cidr: string): boolean {
+  const parsed = parseCidr(cidr);
+  const value = parsed.ok ? parsed.value : cidr.trim();
+  return value.endsWith('/0');
+}
+
 /** Normalised on both sides, so the stored value is the one Hetzner is sent. */
 export const cidrSchema = z
   .string()

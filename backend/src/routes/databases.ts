@@ -6,6 +6,7 @@ import {
   allowlistPutSchema,
   createDatabaseSchema,
   deleteDatabaseSchema,
+  isOpenToWorld,
   metaPatchSchema,
   normaliseDatabaseName,
 } from '@app/shared';
@@ -274,6 +275,34 @@ databasesRouter.put(
     }
 
     const { entries } = allowlistPutSchema.parse(req.body);
+
+    /*
+     * `/0` is a legal range and Hetzner accepts it, so nothing upstream of here
+     * stops an operator reaching for it when an allowlist cannot express their
+     * client's addresses — which is exactly the case for serverless egress.
+     *
+     * On a database without SSL that is not merely wide, it is disclosing: the
+     * connection string this app hands out says `sslmode=disable`, honestly,
+     * because Coolify 4.3.21 creates databases with SSL off and exposes no way
+     * to turn it on afterwards. Opening that to the internet puts the superuser
+     * password on the wire in clear text. Refuse this one combination by name;
+     * every other width stays the operator's call.
+     */
+    const openToWorld = entries.filter((entry) => isOpenToWorld(entry.cidr));
+    if (openToWorld.length > 0) {
+      const target = await getDatabase(uuid);
+      if (!target.enable_ssl) {
+        res.status(409).json({
+          error: {
+            message: `${openToWorld
+              .map((entry) => entry.cidr)
+              .join(' and ')} would open this database to every host on the internet, and SSL is not enabled on it — the password would cross the network in clear text. Enable SSL on the database in Coolify, or allow specific addresses instead.`,
+          },
+        });
+        return;
+      }
+    }
+
     const row = db.select().from(databaseMeta).where(eq(databaseMeta.coolifyUuid, uuid)).get();
     const snapshot = db
       .select()

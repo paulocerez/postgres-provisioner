@@ -1,4 +1,4 @@
-import { type AllowlistEntry, MAX_ALLOWLIST_ENTRIES, parseCidr } from '@app/shared';
+import { type AllowlistEntry, MAX_ALLOWLIST_ENTRIES, isOpenToWorld, parseCidr } from '@app/shared';
 import { useState } from 'react';
 import { useUpdateAllowlist } from '../api/queries';
 import { ConfirmDialog } from './confirm-dialog';
@@ -35,9 +35,17 @@ export function AllowlistCard({
   const [label, setLabel] = useState('');
   const [addError, setAddError] = useState<string | null>(null);
   const [confirmingEmpty, setConfirmingEmpty] = useState(false);
+  const [confirmingWorld, setConfirmingWorld] = useState(false);
 
   const dirty = JSON.stringify(entries) !== JSON.stringify(initial);
   const full = entries.length >= MAX_ALLOWLIST_ENTRIES;
+  /*
+    A `/0` entry is the one width that makes this card stop being a control:
+    it allows every host on the internet, leaving only the password and TLS.
+    It is sometimes the right answer — an allowlist cannot express serverless
+    egress — so it is permitted, but never by accident.
+  */
+  const worldEntries = entries.filter((entry) => isOpenToWorld(entry.cidr));
 
   function add() {
     const parsed = parseCidr(cidr);
@@ -57,6 +65,7 @@ export function AllowlistCard({
 
   function commit() {
     setConfirmingEmpty(false);
+    setConfirmingWorld(false);
     save.mutate(entries, { onSuccess: () => notify('Firewall updated.') });
   }
 
@@ -113,9 +122,22 @@ export function AllowlistCard({
               key={entry.cidr}
               className="flex items-baseline gap-4 border-t border-line px-4 py-2.5 first:border-t-0"
             >
-              <span className="w-44 shrink-0 font-mono text-xs text-fg">{entry.cidr}</span>
+              <span
+                className={`w-44 shrink-0 font-mono text-xs ${
+                  isOpenToWorld(entry.cidr) ? 'font-semibold text-danger' : 'text-fg'
+                }`}
+              >
+                {entry.cidr}
+              </span>
               <span className="min-w-0 flex-1 break-words text-sm text-muted">
-                {entry.label ?? '—'}
+                {isOpenToWorld(entry.cidr) ? (
+                  <>
+                    <span className="text-danger">Every host on the internet</span>
+                    {entry.label ? ` — ${entry.label}` : ''}
+                  </>
+                ) : (
+                  (entry.label ?? '—')
+                )}
               </span>
               <button
                 type="button"
@@ -195,7 +217,11 @@ export function AllowlistCard({
             type="button"
             className="btn-primary"
             disabled={!dirty || save.isPending}
-            onClick={() => (entries.length === 0 ? setConfirmingEmpty(true) : commit())}
+            onClick={() => {
+              if (entries.length === 0) setConfirmingEmpty(true);
+              else if (worldEntries.length > 0) setConfirmingWorld(true);
+              else commit();
+            }}
           >
             {save.isPending ? 'Applying…' : 'Apply to firewall'}
           </button>
@@ -215,6 +241,27 @@ export function AllowlistCard({
           be able to connect on its public port, including anything connecting today.
         </p>
         <p>Containers on the Coolify network are unaffected — they never go through the firewall.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirmingWorld}
+        title="Allow the entire internet?"
+        confirmLabel="Open to the world"
+        busy={save.isPending}
+        onConfirm={commit}
+        onCancel={() => setConfirmingWorld(false)}
+      >
+        <p>
+          <span className="font-mono text-xs">
+            {worldEntries.map((entry) => entry.cidr).join(' and ')}
+          </span>{' '}
+          allows every host on the internet to reach this database&apos;s public port. This list
+          stops being a restriction.
+        </p>
+        <p>
+          The only things still protecting it are its password and its TLS configuration. The port
+          will be found by scanners within hours.
+        </p>
       </ConfirmDialog>
     </section>
   );
