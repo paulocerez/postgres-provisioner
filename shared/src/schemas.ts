@@ -322,6 +322,7 @@ export const projectLinkSchema = z.object({
 export type ProjectLink = z.infer<typeof projectLinkSchema>;
 
 export const vercelProjectSchema = z.object({ id: z.string(), name: z.string() });
+export type VercelProject = z.infer<typeof vercelProjectSchema>;
 export const vercelProjectsSchema = z.object({
   projects: z.array(vercelProjectSchema),
 });
