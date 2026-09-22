@@ -9,6 +9,7 @@ import {
 } from '../../api/queries';
 import { AllowlistCard } from '../../components/allowlist-card';
 import { ConfirmDialog } from '../../components/confirm-dialog';
+import { ConnectedProjectsCard } from '../../components/connected-projects-card';
 import { ConnectionString } from '../../components/connection-string';
 import { ErrorBanner } from '../../components/error-banner';
 import { MetaCard } from '../../components/meta-card';
@@ -207,6 +208,20 @@ function DatabaseDetailPage() {
           )}
         </div>
       </section>
+
+      {/*
+        Hidden unless a VERCEL_TOKEN is configured. The key re-seeds the card
+        after a push, on the same reasoning as the allowlist card below.
+      */}
+      {data.vercelManaged && (
+        <ConnectedProjectsCard
+          key={`${uuid}:${data.links.length}`}
+          uuid={uuid}
+          links={data.links}
+          hasPassword={data.postgresPassword !== null}
+          gatewayAvailable={data.gatewayUrl !== null}
+        />
+      )}
 
       {/*
         Only for public databases: an internal-only one never passes through the

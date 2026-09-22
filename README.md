@@ -263,6 +263,32 @@ internet is the port mapping — `127.0.0.1:5433:5433`. Published without that
 prefix it is a plaintext Postgres proxy on the public internet, which is worse
 than what it replaces. SETUP.md step 14 says so twice.
 
+## Connected projects
+
+Optional, and off unless `VERCEL_TOKEN` is set. `backend/src/vercel.ts` is a
+client shaped like `hetzner.ts`; `POST /api/databases/:uuid/links` pushes a
+connection string into a Vercel project and records the push in
+`database_links`.
+
+Three decisions worth keeping:
+
+- **The server chooses which string to send.** The browser already has it, but
+  trusting the client would let a stale page write an old password into a
+  production project. The gateway URL wins over the public one when both exist,
+  because it is the form that keeps working when the firewall changes.
+- **Vercel is written first, the row second** — the same ordering rule the
+  allowlist follows. The reverse would let this app claim a link that the push
+  had failed to make. A 200 carrying a non-empty `failed` array is Vercel's
+  partial-success shape and is treated as an error, not a success.
+- **The table is a log, not desired state.** Nothing reconciles it. Vercel
+  stores the variable as `sensitive`, so it cannot be read back to check, and
+  the card says when a push happened rather than implying it still holds.
+  Disconnecting deletes the row and leaves the variable alone.
+
+`upsert=true` makes re-pushing idempotent in one call. The alternative —
+create, catch the 403, patch — needs the variable's id, so another round trip,
+and races anyone editing the same variable in the dashboard.
+
 ## Security
 
 - Every `/api` route except `POST /api/auth/login` and `GET /healthz` requires a
@@ -289,6 +315,10 @@ than what it replaces. SETUP.md step 14 says so twice.
   rather than showing a string that would not connect.
 - Delete requires typing the database name; deleting the data volume is a
   separate, unchecked-by-default opt-in.
+- **A `VERCEL_TOKEN`, if set, can write environment variables into every project
+  it can see.** That is a redirect-your-traffic primitive, not just a read, and
+  it widens what someone who obtains `app.db` and the environment can do. Scope
+  the token to one team.
 
 ## Adding a non-superuser role
 

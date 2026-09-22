@@ -170,6 +170,23 @@ If the card is not there at all, this deployment has no `HCLOUD_TOKEN` /
 
 ## 5. Put it in your application
 
+**A Vercel project:** use **Connected projects** on the detail page. Pick the
+project, confirm the variable name and which environments to write, press
+**Connect** — the app sets the variable through Vercel's API, marked sensitive,
+and records what it sent where. Then redeploy on Vercel: setting a variable does
+not affect deployments that are already running.
+
+Two things it deliberately does not do. It will not write an unencrypted
+connection string to a **production** environment — on a database with SSL off
+the public string reads `sslmode=disable`, and that is a disclosure rather than
+a preference, so it answers 409 and asks you to use the TLS route or target
+preview and development instead. And disconnecting forgets the record here
+without deleting the variable from Vercel, because breaking that project's next
+deploy is not a reasonable thing for a row-deletion button to do.
+
+If the card is not there, this deployment has no `VERCEL_TOKEN`; see
+[SETUP.md](SETUP.md) step 15.
+
 **An app running on this server (Coolify):** open your application in Coolify →
 **Environment Variables** → paste the `.env` line using the **internal** URL. It
 resolves over the Coolify Docker network, so no firewall rule and no TLS are
@@ -206,9 +223,9 @@ SSL error means `sslmode` disagrees with step 2.
   create time and has no way to learn a new one.
 - **Deleting a database frees its port for the next one**, and clears its
   allowlist rule with it. Nothing from the old database's access survives.
-- **Keep the Project / owner fields honest.** They are currently the only record
-  of which project depends on which database, and in six months that is the
-  question you will be asking.
+- **Keep the Project / owner fields honest.** Together with Connected projects
+  they are the record of which project depends on which database, and in six
+  months that is the question you will be asking.
 
 ---
 

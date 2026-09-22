@@ -53,6 +53,15 @@ const envSchema = z
     PG_GATEWAY_HOST: blankAsUnset(z.string().min(1)),
     PGPROXY_PORT: z.coerce.number().int().min(1).max(65535).default(5433),
 
+    /**
+     * A Vercel API token, and the team those projects live under. Setting the
+     * token turns on the Connected projects card; without it no Vercel call is
+     * ever made. The token can write environment variables into every project
+     * it can see, so scope it to one team and mark it secret.
+     */
+    VERCEL_TOKEN: blankAsUnset(z.string().min(1)),
+    VERCEL_TEAM_ID: blankAsUnset(z.string().min(1)),
+
     ADMIN_EMAIL: z.string().email('must be a valid email address'),
     /**
      * Checked for shape, not just presence. A bcrypt hash is full of `$`, and
@@ -117,6 +126,13 @@ export const firewallManaged = Boolean(env.HCLOUD_TOKEN && env.HCLOUD_FIREWALL_I
  * existing deployment gains nothing it did not ask for.
  */
 export const pgGatewayEnabled = Boolean(env.PG_GATEWAY_HOST);
+
+/**
+ * Whether this deployment can push a connection string into a Vercel project.
+ * Like `firewallManaged`, everything keys off it: the card is hidden, the
+ * detail payload says so, and no outbound call is made when it is false.
+ */
+export const vercelManaged = Boolean(env.VERCEL_TOKEN);
 
 /**
  * Whether the app is actually reachable over TLS, which is a different question

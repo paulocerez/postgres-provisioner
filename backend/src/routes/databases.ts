@@ -3,10 +3,13 @@ import {
   type DatabaseDetail,
   type DatabaseList,
   type DatabaseMeta,
+  type ProjectLink,
+  type VercelTarget,
   allowlistPutSchema,
   createDatabaseSchema,
   deleteDatabaseSchema,
   isOpenToWorld,
+  linkProjectSchema,
   metaPatchSchema,
   normaliseDatabaseName,
 } from '@app/shared';
@@ -29,12 +32,13 @@ import {
   stopDatabase,
 } from '../coolify.js';
 import { db } from '../db/client.js';
-import { databaseAllowlist, databaseMeta } from '../db/schema.js';
-import { firewallManaged } from '../env.js';
+import { databaseAllowlist, databaseLinks, databaseMeta } from '../db/schema.js';
+import { firewallManaged, vercelManaged } from '../env.js';
 import { findConflictingRule, readFirewallRules, reconcileFirewall } from '../firewall.js';
 import { buildJobInput, createJob, runJob } from '../jobs.js';
 import { asyncHandler, param } from '../middleware.js';
 import { allocatePort } from '../ports.js';
+import { VercelError, listProjects, upsertProjectEnv } from '../vercel.js';
 
 export const databasesRouter: Router = Router();
 
@@ -66,6 +70,37 @@ function allowlistOf(uuid: string): AllowlistEntry[] {
     .all()
     .map((row) => ({ cidr: row.cidr, label: row.label }))
     .sort((a, b) => a.cidr.localeCompare(b.cidr));
+}
+
+function linksOf(uuid: string): ProjectLink[] {
+  return db
+    .select()
+    .from(databaseLinks)
+    .where(eq(databaseLinks.coolifyUuid, uuid))
+    .all()
+    .map((row) => ({
+      id: row.id,
+      platform: row.platform,
+      projectId: row.projectId,
+      projectName: row.projectName,
+      envKey: row.envKey,
+      // Written by this app as a JSON array; a malformed row should degrade to
+      // an empty list rather than take the whole detail page down.
+      targets: safeTargets(row.targets),
+      urlKind: row.urlKind,
+      linkedBy: row.linkedBy,
+      linkedAt: row.linkedAt,
+    }))
+    .sort((a, b) => b.linkedAt - a.linkedAt);
+}
+
+function safeTargets(raw: string): VercelTarget[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed.filter((t) => typeof t === 'string') as VercelTarget[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** List, joined with local meta. Meta rows with no Coolify resource are orphans. */
@@ -143,6 +178,8 @@ databasesRouter.get(
           }
         : null,
       allowlist: allowlistOf(uuid),
+      links: linksOf(uuid),
+      vercelManaged,
       firewall: {
         managed: firewallManaged,
         reachable: rules !== null,
@@ -413,3 +450,171 @@ databasesRouter.delete('/:uuid/meta', (req, res) => {
   });
   res.json({ ok: true });
 });
+
+/**
+ * The projects this token can see, for the Connect picker. Read-only, and the
+ * only Vercel call made before an operator asks for one.
+ */
+databasesRouter.get(
+  '/vercel/projects',
+  asyncHandler(async (_req, res) => {
+    if (!vercelManaged) {
+      res.status(409).json({
+        error: { message: 'This deployment has no VERCEL_TOKEN, so it cannot list Vercel projects.' },
+      });
+      return;
+    }
+    res.json({ projects: await listProjects() });
+  }),
+);
+
+/**
+ * Pushes this database's connection string into a Vercel project.
+ *
+ * The string is chosen here rather than sent by the client: the browser already
+ * has it, but trusting it would let a stale page write an old password into a
+ * production project. The gateway URL wins when one exists, because it is the
+ * form that keeps working when the firewall changes underneath it.
+ *
+ * Vercel is written first and the row second. The reverse order would let this
+ * app claim a link that the push then failed to make — the same rule the
+ * allowlist follows, for the same reason.
+ */
+databasesRouter.post(
+  '/:uuid/links',
+  asyncHandler(async (req, res) => {
+    const uuid = param(req, 'uuid');
+    if (!vercelManaged) {
+      res.status(409).json({
+        error: {
+          message:
+            'This deployment cannot connect projects. Set VERCEL_TOKEN to enable it.',
+        },
+      });
+      return;
+    }
+
+    const input = linkProjectSchema.parse(req.body);
+    const row = db.select().from(databaseMeta).where(eq(databaseMeta.coolifyUuid, uuid)).get();
+    const password = row?.postgresPassword ?? null;
+    if (!password) {
+      res.status(409).json({
+        error: {
+          message:
+            'This database has no password stored, so there is no connection string to send. It was created outside this app.',
+        },
+      });
+      return;
+    }
+
+    const raw = await getDatabase(uuid);
+    const gatewayUrl = buildGatewayConnectionUrl(raw, password);
+    const publicUrl = buildPublicConnectionUrl(raw, password);
+    const url = gatewayUrl ?? publicUrl;
+    const urlKind = gatewayUrl ? 'gateway' : 'public';
+    if (!url) {
+      res.status(409).json({
+        error: {
+          message:
+            'This database is internal-only and no TLS gateway is configured, so nothing off this server could use a string from it.',
+        },
+      });
+      return;
+    }
+
+    /*
+     * Refuse to write a plaintext string into a production environment. On a
+     * database without SSL the public URL reads `sslmode=disable`, and pushing
+     * that to production is the same disclosure the allowlist guard refuses —
+     * except here the app would be the one doing it. Preview and development
+     * stay the operator's call.
+     */
+    if (urlKind === 'public' && !raw.enable_ssl && input.targets.includes('production')) {
+      res.status(409).json({
+        error: {
+          message:
+            'This database has SSL disabled, so its public connection string is unencrypted — it will not be written to a production environment. Use the TLS gateway, or target preview and development only.',
+        },
+      });
+      return;
+    }
+
+    const actor = actorOf(req);
+    await upsertProjectEnv({
+      projectId: input.projectId,
+      key: input.envKey,
+      value: url,
+      targets: input.targets,
+      comment: `${row?.name ?? uuid} — provisioned by postgres-provisioner`,
+    });
+
+    const now = Date.now();
+    db.insert(databaseLinks)
+      .values({
+        coolifyUuid: uuid,
+        platform: input.platform,
+        projectId: input.projectId,
+        projectName: input.projectName,
+        envKey: input.envKey,
+        targets: JSON.stringify(input.targets),
+        urlKind,
+        linkedBy: actor,
+        linkedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          databaseLinks.coolifyUuid,
+          databaseLinks.platform,
+          databaseLinks.projectId,
+          databaseLinks.envKey,
+        ],
+        set: {
+          projectName: input.projectName,
+          targets: JSON.stringify(input.targets),
+          urlKind,
+          linkedBy: actor,
+          linkedAt: now,
+        },
+      })
+      .run();
+
+    // `project` and `envKey` deliberately, and no url: `redact()` blanks any
+    // key matching /password|token|url|…/i, and the value is a password.
+    writeAudit({
+      actor,
+      action: 'project_link',
+      targetUuid: uuid,
+      targetName: row?.name ?? null,
+      details: { project: input.projectName, envKey: input.envKey, targets: input.targets, urlKind },
+    });
+
+    res.json({ ok: true });
+  }),
+);
+
+/**
+ * Forgets a link. Local only — it does not delete the variable from Vercel,
+ * because this app cannot know whether the project still depends on it, and
+ * silently breaking someone's production deploy is not a reasonable thing for a
+ * row-deletion button to do. The UI says so.
+ */
+databasesRouter.delete(
+  '/:uuid/links/:id',
+  asyncHandler(async (req, res) => {
+    const uuid = param(req, 'uuid');
+    const id = Number(param(req, 'id'));
+    if (!Number.isInteger(id)) {
+      res.status(400).json({ error: { message: 'Not a link id.' } });
+      return;
+    }
+    const existing = db.select().from(databaseLinks).where(eq(databaseLinks.id, id)).get();
+    db.delete(databaseLinks).where(eq(databaseLinks.id, id)).run();
+    writeAudit({
+      actor: actorOf(req),
+      action: 'project_unlink',
+      targetUuid: uuid,
+      targetName: existing?.projectName ?? null,
+    });
+    res.json({ ok: true });
+  }),
+);

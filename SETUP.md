@@ -529,6 +529,40 @@ Things worth knowing:
 
 ---
 
+## 15. Connecting projects automatically (optional)
+
+With a Vercel token, the detail page grows a **Connected projects** card that
+writes a database's connection string into a project's environment variables,
+so the last manual step of wiring a project goes away.
+
+1. Vercel → **Account Settings → Tokens** → create one. Scope it to the team
+   those projects live in, not to your whole account.
+2. Set `VERCEL_TOKEN` in the application's environment and **mark it secret**.
+   If the projects belong to a team, set `VERCEL_TEAM_ID` too — without it the
+   API only sees your personal projects and a link attempt answers 404.
+3. Redeploy. The card appears on every database whose password this app holds.
+
+Be deliberate about this one. The token can write environment variables into
+every project it can see, which is enough to point a production app at a
+different database. This app already holds a Coolify deploy token and every
+database password — `$DATA_DIR/app.db` was already the most valuable file on
+the box, and this raises what an attacker does with it rather than merely what
+they learn.
+
+What it will not do:
+
+- **Write an unencrypted string to production.** A database with SSL off yields
+  a `sslmode=disable` public URL; pushing that to a production environment is
+  refused with a 409 naming the cause. Preview and development remain your call.
+- **Delete the variable when you disconnect.** Disconnecting forgets the local
+  record only. The variable stays in Vercel, because this app cannot know
+  whether the project still depends on it.
+- **Tell you the variable is still there.** Vercel stores it as `sensitive`,
+  meaning write-only — neither this app nor the dashboard can read it back, so
+  the card reports when it was written, not that it is still in force.
+
+---
+
 ## Troubleshooting
 
 Every one of these was hit during the first real deployment.

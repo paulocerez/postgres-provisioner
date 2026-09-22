@@ -5,11 +5,13 @@ import type {
   DatabaseDetail,
   DatabaseList,
   Job,
+  LinkProjectInput,
   MetaPatchInput,
   MetaResponse,
   Session,
+  VercelProjectList,
 } from '@app/shared';
-import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './client';
 
 /**
@@ -161,6 +163,49 @@ export function useUpdateAllowlist(uuid: string) {
   return useMutation({
     mutationFn: (entries: AllowlistEntry[]) =>
       apiFetch<{ ok: true }>(`/databases/${uuid}/allowlist`, { method: 'PUT', body: { entries } }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.database(uuid) });
+    },
+  });
+}
+
+/**
+ * The Vercel projects this deployment's token can see. Only fetched when the
+ * operator opens the picker — it is an outbound API call, not page furniture,
+ * and `enabled` keeps it off the detail page's critical path.
+ */
+export function useVercelProjects(enabled: boolean) {
+  return useQuery({
+    queryKey: ['vercel', 'projects'],
+    queryFn: () => apiFetch<VercelProjectList>('/databases/vercel/projects'),
+    enabled,
+    // Projects change rarely and the list is only a picker; refetching on every
+    // focus would spend someone's Vercel rate limit for nothing.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Pushes this database's connection string into a Vercel project. The server
+ * picks which string to send — the page may be holding a stale one.
+ */
+export function useLinkProject(uuid: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LinkProjectInput) =>
+      apiFetch<{ ok: true }>(`/databases/${uuid}/links`, { method: 'POST', body: input }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.database(uuid) });
+    },
+  });
+}
+
+/** Forgets a link locally. The variable stays in the Vercel project. */
+export function useUnlinkProject(uuid: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<{ ok: true }>(`/databases/${uuid}/links/${id}`, { method: 'DELETE' }),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.database(uuid) });
     },

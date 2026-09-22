@@ -275,12 +275,68 @@ export const allowlistPutSchema = z
   });
 export type AllowlistPutInput = { entries: AllowlistEntry[] };
 
+// --- connected projects ------------------------------------------------------
+
+export const VERCEL_TARGETS = ['production', 'preview', 'development'] as const;
+export const vercelTargetSchema = z.enum(VERCEL_TARGETS);
+export type VercelTarget = z.infer<typeof vercelTargetSchema>;
+
+/**
+ * Environment variable names are `[A-Z_][A-Z0-9_]*` by convention and by what
+ * most runtimes will actually expose. Enforced here rather than left to Vercel
+ * so a typo fails before anything is written to someone's production project.
+ */
+export const envKeySchema = z
+  .string()
+  .trim()
+  .min(1, 'Enter a variable name.')
+  .max(64, 'Keep the name under 64 characters.')
+  .regex(
+    /^[A-Z_][A-Z0-9_]*$/,
+    'Use upper-case letters, digits and underscores, starting with a letter or underscore — e.g. DATABASE_URL.',
+  );
+
+export const linkProjectSchema = z.object({
+  platform: z.literal('vercel'),
+  projectId: z.string().min(1),
+  projectName: z.string().min(1),
+  envKey: envKeySchema,
+  targets: z
+    .array(vercelTargetSchema)
+    .min(1, 'Choose at least one environment.')
+    .transform((t) => [...new Set(t)]),
+});
+export type LinkProjectInput = z.input<typeof linkProjectSchema>;
+
+export const projectLinkSchema = z.object({
+  id: z.number(),
+  platform: z.literal('vercel'),
+  projectId: z.string(),
+  projectName: z.string(),
+  envKey: z.string(),
+  targets: z.array(vercelTargetSchema),
+  urlKind: z.enum(['gateway', 'public']),
+  linkedBy: z.string(),
+  linkedAt: z.number(),
+});
+export type ProjectLink = z.infer<typeof projectLinkSchema>;
+
+export const vercelProjectSchema = z.object({ id: z.string(), name: z.string() });
+export const vercelProjectsSchema = z.object({
+  projects: z.array(vercelProjectSchema),
+});
+export type VercelProjectList = z.infer<typeof vercelProjectsSchema>;
+
 /** Full detail, only served by GET /api/databases/:uuid (contains the password). */
 export const databaseDetailSchema = databaseSchema.extend({
   internalUrl: z.string().nullable(),
   publicUrl: z.string().nullable(),
   /** Through the TLS gateway, when one is configured. See `pgGateway` on meta. */
   gatewayUrl: z.string().nullable(),
+  /** Projects this app has pushed a connection string to. */
+  links: z.array(projectLinkSchema),
+  /** Whether a VERCEL_TOKEN is configured, so the UI knows to offer the card. */
+  vercelManaged: z.boolean(),
   postgresUser: z.string().nullable(),
   postgresDb: z.string().nullable(),
   postgresPassword: z.string().nullable(),
@@ -426,6 +482,8 @@ export const auditActionSchema = z.enum([
   'meta_update',
   'meta_remove',
   'allowlist_update',
+  'project_link',
+  'project_unlink',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

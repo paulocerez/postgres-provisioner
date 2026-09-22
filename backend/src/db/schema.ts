@@ -69,6 +69,45 @@ export const databaseAllowlist = sqliteTable(
   }),
 );
 
+/**
+ * Which project holds a connection string to which database.
+ *
+ * This is a record of a push that happened, not desired state — unlike
+ * `database_allowlist`, nothing reconciles it. Vercel stores the variable as
+ * `sensitive`, meaning it is write-only there and cannot be read back, so this
+ * table is the only account of what was sent where. A row going stale (someone
+ * deletes the variable in the dashboard) is possible and not detectable; the UI
+ * says when the row was written rather than implying it is still in force.
+ */
+export const databaseLinks = sqliteTable(
+  'database_links',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    coolifyUuid: text('coolify_uuid').notNull(),
+    /** Only 'vercel' today; the column exists so Render does not need a table. */
+    platform: text('platform').notNull().$type<'vercel'>(),
+    projectId: text('project_id').notNull(),
+    /** Snapshot for display — a project renamed on Vercel should not orphan the row. */
+    projectName: text('project_name').notNull(),
+    envKey: text('env_key').notNull(),
+    /** JSON string[] of Vercel targets the variable was written to. */
+    targets: text('targets').notNull(),
+    /** Which connection string was sent: 'gateway' or 'public'. */
+    urlKind: text('url_kind').notNull().$type<'gateway' | 'public'>(),
+    linkedBy: text('linked_by').notNull(),
+    linkedAt: integer('linked_at').notNull(),
+  },
+  (table) => ({
+    uuidIdx: index('database_links_uuid_idx').on(table.coolifyUuid),
+    uniqueTarget: uniqueIndex('database_links_uuid_project_key_idx').on(
+      table.coolifyUuid,
+      table.platform,
+      table.projectId,
+      table.envKey,
+    ),
+  }),
+);
+
 export const auditLog = sqliteTable(
   'audit_log',
   {
@@ -90,4 +129,5 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type DatabaseMetaRow = typeof databaseMeta.$inferSelect;
 export type DatabaseAllowlistRow = typeof databaseAllowlist.$inferSelect;
+export type DatabaseLinkRow = typeof databaseLinks.$inferSelect;
 export type AuditLogRow = typeof auditLog.$inferSelect;
