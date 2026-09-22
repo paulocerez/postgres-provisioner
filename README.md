@@ -34,10 +34,14 @@ can actually use.
 
 npm workspaces: `shared/` (zod schemas used by both sides), `backend/`
 (Express 4 + Drizzle/SQLite), `frontend/` (React 18 + Vite, TanStack
-Router/Query/Form/Table, Tailwind). One Docker image; in production Express
+Router/Query/Form/Table, Tailwind, and shadcn/ui over Radix — its components
+live under `frontend/src/components/ui`, the only thing the `@/` alias in
+`frontend/vite.config.ts` resolves to). One Docker image; in production Express
 serves the built SPA.
 
 ## Local development
+
+Node 22 or newer.
 
 ```bash
 npm install
@@ -46,6 +50,14 @@ npm run hash-password -- 'a long admin password'   # → ADMIN_PASSWORD_HASH=...
 npm run build -w shared       # backend and frontend compile against its types
 npm run dev                   # Express on :3000, Vite on :5173 proxying /api
 ```
+
+The password must be at least 12 characters; `hash-password` refuses anything
+shorter rather than hashing it.
+
+That root `.env` is a development convenience: `npm run dev` loads it with
+Node's `--env-file-if-exists`, and nothing else in the app reads a file. The
+Docker image takes its environment from Coolify, and `npm start` takes it from
+the shell.
 
 For local development set `DATA_DIR=./data`, `APP_ORIGIN=http://localhost:5173`
 and `NODE_ENV=development` (which makes Vite serve the client instead of Express).
@@ -60,8 +72,11 @@ Other scripts:
 
 ```bash
 npm run build       # shared → frontend → backend
-npm test            # port allocation, CIDR parsing, firewall rule ownership
-npm run typecheck   # all three workspaces
+npm test            # backend unit tests: env parsing, port allocation, CIDR,
+                    #   firewall rule ownership, link building, the gateway
+npm run typecheck   # all three workspaces; needs one build first, because it
+                    #   typechecks frontend/src/routeTree.gen.ts, which the
+                    #   TanStack Router plugin generates and git ignores
 npm run db:generate # regenerate drizzle/ after editing backend/src/db/schema.ts
 ```
 
@@ -311,11 +326,14 @@ and races anyone editing the same variable in the dashboard.
 
 ## Security
 
-- Every `/api` route except `POST /api/auth/login` and `GET /healthz` requires a
-  session; the client hiding a button is not the control.
+- Every `/api` route requires a session except the three under `/api/auth`
+  (`login`, `logout`, and `me`, which answers 401 when there is none) and
+  `GET /healthz`, which is outside `/api` entirely. The client hiding a button
+  is not the control.
 - Session ids are random 32-byte tokens; only their SHA-256 is stored, and the
-  cookie is signed with `SESSION_SECRET`, `HttpOnly`, `SameSite=Lax`, and `Secure`
-  in production. Logout deletes the row, so revocation is real.
+  cookie is signed with `SESSION_SECRET`, `HttpOnly`, `SameSite=Lax`, and
+  `Secure` whenever `APP_ORIGIN` is an `https://` one. Logout deletes the row,
+  so revocation is real.
 - Login is rate-limited to 5 attempts per 15 minutes per IP, and wrong email and
   wrong password return the same message after the same work.
 - CSRF: `SameSite=Lax` plus an `Origin`/`Referer` check against `APP_ORIGIN` and a

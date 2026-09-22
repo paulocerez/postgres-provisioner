@@ -221,7 +221,7 @@ Then set these in Coolify → Environment Variables:
 | `COOLIFY_TOKEN` | `1\|abc…` | From step 2. Mark secret. |
 | `COOLIFY_SERVER_UUID` | `zeifr6b…` | Optional; resolved by the name `localhost` if empty |
 | `COOLIFY_PROJECT_UUID` | `zzlafvh…` | Optional; first project if empty |
-| `COOLIFY_ENVIRONMENT` | `production` | Must match an environment name in that project |
+| `COOLIFY_ENVIRONMENT` | `production` | An environment name in that project. A name that matches nothing silently falls back to the project's first environment, so check the spelling. |
 | `COOLIFY_S3_STORAGE_UUID` | *(empty)* | Needed for backups. See step 12. |
 | `PUBLIC_HOST` | `1.2.3.4` | Host used in connection strings handed to applications. Deliberately **not** derived from `COOLIFY_URL`. |
 | `PORT_RANGE_START` / `_END` | `5432` / `5441` | Host ports the app may allocate. **Your firewall must already allow this range.** |
@@ -280,11 +280,12 @@ pre-fills a generated `http://…sslip.io` domain if you set none.
 
 - same scheme (`http://` or `https://`)
 - same host and port
-- **no trailing slash, no path**
 
-The CSRF check compares the browser's `Origin` header against this string, and
-browsers send scheme+host+port only. A trailing slash makes every non-GET request
-return `403 Cross-origin request rejected` — login works, then nothing else does.
+The CSRF check parses `APP_ORIGIN` and compares its scheme+host+port against the
+browser's `Origin` header, so a trailing slash or a path on the value is
+harmless. A wrong scheme, host or port is not: every non-GET request then
+returns `403 Cross-origin request rejected` — login works, then nothing else
+does.
 
 **Getting HTTPS:** open Manage Domains and change `http://` to `https://` on the
 sslip.io domain; Coolify will request a Let's Encrypt certificate. This usually
@@ -488,9 +489,10 @@ dig +short pg.<your-domain>     # must be the server's address
 ### 14.2 Pick a port outside `PORT_RANGE`
 
 `PGPROXY_PORT` must not collide with the range the app hands out to databases
-(`PORT_RANGE_START`–`PORT_RANGE_END`, default 5432–5441). The default of `5433`
-is *inside* that range and will collide as soon as a database is allocated it.
-Use something clear of it — `5500` is fine.
+(`PORT_RANGE_START`–`PORT_RANGE_END`, default 5432–5441), because both are
+published on the host. The default of `5500` is already clear of it, so you can
+leave it unset. If you do move it, keep it outside the range: the app validates
+this at startup and refuses to boot on an overlap rather than failing later.
 
 ```
 PG_GATEWAY_HOST=pg.<your-domain>

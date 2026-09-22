@@ -24,8 +24,10 @@ import { env, pgGatewayEnabled } from './env.js';
 // openapi.json at tag v4.3.21. Three things about this version drive the design:
 //
 //   1. SSL is not in the API at all — no `enable_ssl` or `ssl_mode` on create or
-//      PATCH. It is readable on the resource and Coolify defaults it on. We read
-//      it back and warn; we cannot set it.
+//      PATCH. Both are readable on the resource but accepted in no request body,
+//      and a database created through the API comes out with SSL *off* (the
+//      Coolify UI has a toggle; the API has nothing). We read the flag back and
+//      warn; we cannot set it.
 //   2. The password is never disclosed by any endpoint, but IS accepted on
 //      create. We generate it, send it, and store it — see jobs.ts.
 //   3. Lifecycle is POST, not GET, and create needs `environment_uuid` as well
